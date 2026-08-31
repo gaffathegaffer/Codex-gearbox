@@ -1,0 +1,44 @@
+name: Apply Gearbox v1.1 transport patch
+
+on:
+  push:
+    branches:
+      - transport/gearbox-v1.1.0-staging
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging payload
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify and unpack patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          gunzip -c gearbox-v1.1.0-release.patch.gz > "$RUNNER_TEMP/gearbox-v1.1.0-release.patch"
+          echo "052170fc60b2f3759828c9bc2e3415f8aa007a770a5902deaea83a6fae841385  $RUNNER_TEMP/gearbox-v1.1.0-release.patch" | sha256sum -c -
+          test "$(grep -c '^Subject: \[PATCH [1-4]/4\]' "$RUNNER_TEMP/gearbox-v1.1.0-release.patch")" -eq 4
+
+      - name: Apply four commits to exact remote baseline
+        shell: bash
+        env:
+          BASE_SHA: 00e7322d1d7630464f616df3fc98049ec5518269
+          CANDIDATE_BRANCH: transport/gearbox-v1.1.0-applied
+        run: |
+          set -euo pipefail
+          git checkout --detach "$BASE_SHA"
+          git config user.name "Codex Gearbox Transport"
+          git config user.email "codex-gearbox-transport@localhost"
+          git am "$RUNNER_TEMP/gearbox-v1.1.0-release.patch"
+          test "$(git rev-list --count "$BASE_SHA"..HEAD)" -eq 4
+          git diff --check "$BASE_SHA"..HEAD
+          echo "Applied HEAD: $(git rev-parse HEAD)"
+          git log --oneline --reverse "$BASE_SHA"..HEAD
+          git diff --stat "$BASE_SHA"..HEAD
+          git push origin "HEAD:refs/heads/$CANDIDATE_BRANCH"
