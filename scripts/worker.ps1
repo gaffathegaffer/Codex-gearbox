@@ -25,6 +25,7 @@ $promptPath = Join-Path $StepDir 'prompt.txt'
 $finalPath = Join-Path $StepDir 'final.json'
 $stdoutPath = Join-Path $StepDir 'stdout.log'
 $stderrPath = Join-Path $StepDir 'stderr.log'
+$preflightPath = Join-Path $StepDir 'shell-preflight.json'
 
 $contextText = ''
 if ($ContextPath -and (Test-Path $ContextPath)) {
@@ -94,14 +95,73 @@ $arguments = @(
     '-'
 )
 
+# Codex native Windows sandbox currently cannot reliably spawn the Microsoft Store/MSIX
+# PowerShell executable under a restricted token. The failure surfaces as
+# CreateProcessAsUserW failed: 5 (Access is denied). Keep the user's global PATH untouched,
+# but remove WindowsApps entries only from the environment inherited by this child Codex.
+$originalPath = [string]$env:PATH
+$pathEntries = @($originalPath -split ';' | Where-Object { $_ -and $_.Trim() })
+$removedWindowsApps = New-Object System.Collections.ArrayList
+$safePathEntries = New-Object System.Collections.ArrayList
+foreach ($entry in $pathEntries) {
+    $normalized = $entry.Trim().TrimEnd('\')
+    if ($normalized -match '(?i)(^|\\)WindowsApps($|\\)') {
+        [void]$removedWindowsApps.Add($entry)
+    }
+    else {
+        [void]$safePathEntries.Add($entry)
+    }
+}
+$childPath = (@($safePathEntries) -join ';')
+
+function Resolve-ExecutableFromPath {
+    param(
+        [Parameter(Mandatory=$true)][string]$Name,
+        [Parameter(Mandatory=$true)][string]$PathValue
+    )
+
+    $extensions = @('')
+    if ([System.IO.Path]::GetExtension($Name) -eq '') {
+        $extensions = @('.exe','.cmd','.bat','')
+    }
+
+    foreach ($directory in @($PathValue -split ';')) {
+        if (-not $directory) { continue }
+        foreach ($extension in $extensions) {
+            $candidate = Join-Path $directory ($Name + $extension)
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                return $candidate
+            }
+        }
+    }
+    return $null
+}
+
+$preflight = [ordered]@{
+    generated_at = (Get-Date).ToString('o')
+    sandbox = $Sandbox
+    codex = [string]$codex
+    original_path_contains_windowsapps = ($removedWindowsApps.Count -gt 0)
+    removed_windowsapps_entries = @($removedWindowsApps)
+    child_path = $childPath
+    child_pwsh = Resolve-ExecutableFromPath -Name 'pwsh' -PathValue $childPath
+    child_powershell = Resolve-ExecutableFromPath -Name 'powershell' -PathValue $childPath
+    workaround = 'child-path-windowsapps-filter'
+}
+$preflight | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $preflightPath -Encoding UTF8
+
 $exitCode = 1
 try {
+    $env:PATH = $childPath
     $prompt | & $codex @arguments 1> $stdoutPath 2> $stderrPath
     $exitCode = $LASTEXITCODE
 }
 catch {
     $_ | Out-String | Set-Content -LiteralPath $stderrPath -Encoding UTF8
     $exitCode = 1
+}
+finally {
+    $env:PATH = $originalPath
 }
 
 $result = $null
@@ -133,6 +193,7 @@ $wrapper = [pscustomobject]@{
     parse_error = $parseError
     stderr_tail = $stderrTail
     step_dir = $StepDir
+    shell_preflight = $preflight
 }
 
 $wrapper | ConvertTo-Json -Depth 20 -Compress
