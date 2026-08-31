@@ -15,6 +15,7 @@ Codex Gearbox adds an `eco / balance / sport` layer above `codex exec`. Instead 
 - Uses structured worker results to decide whether to complete, escalate, retry, continue, or stop.
 - Carries compact handoff context between workers instead of forcing every stronger model to rediscover the entire task.
 - Records run metadata, decisions, outputs, and verification state under `.gearbox/`.
+- Persists a readable `run-state.json` checkpoint and append-only `events.jsonl` per run; interrupted runs can be inspected and safely resumed.
 - Preserves the user's working tree. Gearbox never runs destructive Git cleanup commands on its own.
 - Installs as a Codex plugin/skill when supported, with personal skill fallbacks for compatibility.
 
@@ -47,6 +48,14 @@ phone / Codex Remote
 **Sol Ultra is deliberately outside the built-in profile ceilings.** To permit it for a particular workload, explicitly pass `-MaxTier sol-ultra`. This makes the most expensive/orchestrated mode an opt-in rather than something Gearbox can silently wander into.
 
 The exact tier table lives in `config/gearbox.json` and can be edited without changing the router code.
+
+## Recovery
+
+Each new run stores `.gearbox/runs/<run-id>/run-state.json` and `events.jsonl`. The state is versioned (`gearbox.run-state`, version 1), updated atomically through a validated temporary file, and records the task, profile, tier/reasoning, checkpoint, worker history, verification, review, and terminal status. Events are compact JSON Lines intended for manual diagnosis.
+
+Use the installed or checkout entry point with `-InspectRun <run-id>` to inspect a run without starting a worker. Use `-Resume <run-id>` to continue only from a safe persisted checkpoint. Resume refuses terminal runs, corrupt or unknown state versions, missing workdirs, changed Git HEAD, changed Git status, changed non-Git top-level file fingerprint, and a `worker_started` checkpoint whose outcome is unknown. A completed worker is reusable only after its result and step record were persisted.
+
+The Git fingerprint records repository root, HEAD, branch, dirty status hash, and status count; it is a change detector, not a full repository archive, and cannot detect every semantic change outside Git's status model. Non-Git workdirs use a lightweight top-level file name/size/mtime fingerprint. Recovery is deliberately conservative: when Gearbox cannot establish continuity it refuses to resume rather than guessing.
 
 ## Requirements
 

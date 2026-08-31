@@ -47,6 +47,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & .\scripts\gearbox.ps1 -Profile eco -DryRun -Task 'Install dependencies and format documentation' -Workdir $PWD.Path
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Deterministic recovery tests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tests\recovery.tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\scripts\gearbox.ps1 -Profile balance -DryRun -Task 'Diagnose a failing integration and fix the regression' -Workdir $PWD.Path
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\scripts\gearbox.ps1 -Profile sport -MaxTier sol-ultra -DryRun -Task 'Perform a repository-wide security architecture audit' -Workdir $PWD.Path

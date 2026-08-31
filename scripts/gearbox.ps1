@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true, Position=0)][string]$Task,
+    [Parameter(Position=0)][string]$Task = '',
     [ValidateSet('eco','balance','sport','custom')][string]$Profile = 'balance',
     [string]$Workdir = (Get-Location).Path,
     [string]$MinTier,
@@ -10,11 +10,35 @@ param(
     [string]$VerifyCommand,
     [string]$Sandbox,
     [switch]$NoFinalReview,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$Resume,
+    [string]$InspectRun,
+    [switch]$Json
 )
 
 . (Join-Path $PSScriptRoot 'common.ps1')
+. (Join-Path $PSScriptRoot 'recovery.ps1')
 $config = Get-GearboxConfig
+
+if ($InspectRun) {
+    $inspectDir = if ([IO.Path]::IsPathRooted($InspectRun)) { $InspectRun } else { Join-Path (Get-Location) ('.gearbox\runs\' + $InspectRun) }
+    Show-RecoveryInspection -RunDir $inspectDir -Json:$Json | Select-Object -Last 1 | ConvertTo-Json -Depth 10
+    exit 0
+}
+
+$resumeState = $null
+if ($Resume) {
+    $resumeDir = if ([IO.Path]::IsPathRooted($Resume)) { $Resume } else { Join-Path (Get-Location) ('.gearbox\runs\' + $Resume) }
+    $resumeState = Read-RecoveryState $resumeDir
+    $assessment = Get-ResumeAssessment $resumeState $resumeDir
+    if (-not $assessment.resumable) { throw "Resume refused for '$($resumeState.run_id)': $($assessment.reason)" }
+    $Workdir = [string]$resumeState.workdir
+    $Profile = [string]$resumeState.profile
+    $profileConfig = $config.profiles.([string]$resumeState.profile)
+    $MinTier = [string]$profileConfig.min_tier; $StartTier = [string]$resumeState.current_tier; $MaxTier = [string]$profileConfig.max_tier
+    Add-RecoveryEvent $resumeDir 'resume_started' @{ checkpoint=$assessment.checkpoint }
+    $resumeState.terminal_status='running'; Save-RecoveryState $resumeDir $resumeState
+}
 if (-not (Test-Path $Workdir)) { throw "Workdir not found: $Workdir" }
 $Workdir = (Resolve-Path $Workdir).Path
 
@@ -64,7 +88,7 @@ else {
     }
 }
 
-$currentTier = $StartTier
+$currentTier = if ($resumeState) { [string]$resumeState.current_tier } else { $StartTier }
 $maxEscalations = [int]$profileConfig.max_escalations
 
 $plan = [pscustomobject]@{
@@ -96,8 +120,8 @@ if ($codexInfo.version -lt $minimumVersion) {
 }
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$runId = "$stamp-$([guid]::NewGuid().ToString('N').Substring(0,6))"
-$runDir = Join-Path $Workdir ('.gearbox\runs\' + $runId)
+$runId = if ($resumeState) { [string]$resumeState.run_id } else { "$stamp-$([guid]::NewGuid().ToString('N').Substring(0,6))" }
+$runDir = if ($resumeState) { $resumeDir } else { Join-Path $Workdir ('.gearbox\runs\' + $runId) }
 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 
 $runMeta = [pscustomobject]@{
@@ -107,7 +131,15 @@ $runMeta = [pscustomobject]@{
     plan = $plan
     codex = $codexInfo.raw
 }
-Write-GearboxJson -Value $runMeta -Path (Join-Path $runDir 'run.json')
+if (-not $resumeState) {
+    Write-GearboxJson -Value $runMeta -Path (Join-Path $runDir 'run.json')
+    $fingerprint = Get-WorkspaceFingerprint $Workdir
+    $state = New-RecoveryState @{ run_id=$runId; profile=$Profile; workdir=$Workdir; sandbox=$Sandbox; task=$Task; initial_tier=$StartTier; current_tier=$StartTier; max_steps=$MaxSteps; fingerprint=$fingerprint }
+    Save-RecoveryState $runDir $state
+    Add-RecoveryEvent $runDir 'run_started' @{ profile=$Profile; tier=$StartTier }
+    Add-RecoveryEvent $runDir 'classification_completed' @{ tier=$StartTier }
+    try { Test-RecoveryFailureInjection 'after_classification' } catch { $state.terminal_status='interrupted'; $state.checkpoint='after_classification'; Save-RecoveryState $runDir $state; Add-RecoveryEvent $runDir 'run_interrupted' @{ checkpoint='after_classification' }; throw }
+} else { $state=$resumeState; $MaxSteps=[int]$state.max_steps; $currentTier=[string]$state.current_tier }
 
 $workerScript = Join-Path $PSScriptRoot 'worker.ps1'
 $verifyScript = Join-Path $PSScriptRoot 'verify.ps1'
@@ -126,11 +158,13 @@ if ($classifier.signals -and $classifier.signals.Count -gt 0) {
     Write-Host ("Initial routing: " + (($classifier.signals | ForEach-Object { [string]$_ }) -join ', ')) -ForegroundColor DarkGray
 }
 
-for ($step = 1; $step -le $MaxSteps; $step++) {
+for ($step = ($(if($resumeState){[int]$resumeState.current_step + 1}else{1})); $step -le $MaxSteps; $step++) {
     $stepDir = Join-Path $runDir ('step-{0:d2}' -f $step)
     New-Item -ItemType Directory -Path $stepDir -Force | Out-Null
     $modeSuffix = if ($reviewMode) { ' [review]' } else { '' }
     Write-Host ("[{0}/{1}] {2}{3}" -f $step,$MaxSteps,$currentTier,$modeSuffix) -ForegroundColor Yellow
+    $state.current_step=$step; $state.current_tier=$currentTier; $state.checkpoint='worker_started'; Save-RecoveryState $runDir $state
+    Add-RecoveryEvent $runDir 'worker_started' @{ step=$step; tier=$currentTier; review=$reviewMode }
 
     $workerText = & $workerScript -Task $Task -Workdir $Workdir -TierId $currentTier -MinTier $MinTier -MaxTier $MaxTier -StepDir $stepDir -ContextPath $handoffPath -Sandbox $Sandbox -ReviewMode:$reviewMode
     $wrapper = $null
@@ -161,6 +195,13 @@ for ($step = 1; $step -le $MaxSteps; $step++) {
     }
     [void]$history.Add($record)
     Write-GearboxJson -Value $record -Path (Join-Path $stepDir 'step.json')
+    $state.worker_history=@($history | ForEach-Object { [pscustomobject]@{ step=$_.step; tier=$_.tier; status=if($_.result){$_.result.status}else{'failed'}; reasoning=(Get-Tier -Config $config -TierId $_.tier).reasoning; result_persisted=($null -ne $_.result) } })
+    $state.verification=@($verification)
+    if ($result -and $result.failure_signature) { $state.failure_signature=[string]$result.failure_signature }
+    if ($result -and $result.changed_files) { $state.changed_files=@($result.changed_files) }
+    $state.checkpoint='after_worker_result'; Save-RecoveryState $runDir $state
+    Add-RecoveryEvent $runDir (if($null -eq $result -or $exitCode -ne 0){'worker_failed'}else{'worker_completed'}) @{ step=$step; tier=$currentTier; status=if($result){$result.status}else{'failed'} }
+    try { Test-RecoveryFailureInjection 'after_worker_result' } catch { $state.terminal_status='interrupted'; Save-RecoveryState $runDir $state; Add-RecoveryEvent $runDir 'run_interrupted' @{ checkpoint='after_worker_result' }; throw }
 
     if ($null -eq $result -or $exitCode -ne 0) {
         $next = Get-NextHigherTier -Config $config -CurrentTier $currentTier -MaxTier $MaxTier
@@ -176,7 +217,10 @@ for ($step = 1; $step -le $MaxSteps; $step++) {
             }
             $handoffPath = Join-Path $runDir 'handoff.json'
             Write-GearboxJson -Value $handoff -Path $handoffPath
+            $fromTier = $currentTier
             $currentTier = $next
+            $state.escalation_count=$escalations; $state.current_tier=$currentTier; $state.checkpoint='before_next_worker'; Save-RecoveryState $runDir $state
+            Add-RecoveryEvent $runDir 'escalation' @{ from_tier=$fromTier; to_tier=$next; step=$step }
             $reviewMode = $false
             continue
         }
@@ -240,6 +284,8 @@ for ($step = 1; $step -le $MaxSteps; $step++) {
         $handoffPath = Join-Path $runDir 'handoff.json'
         Write-GearboxJson -Value $handoff -Path $handoffPath
         $currentTier = $candidate
+        $state.escalation_count=$escalations; $state.current_tier=$currentTier; $state.checkpoint='before_next_worker'; Save-RecoveryState $runDir $state
+        Add-RecoveryEvent $runDir 'escalation' @{ to_tier=$candidate; step=$step }
         $reviewMode = $false
         continue
     }
@@ -266,6 +312,8 @@ for ($step = 1; $step -le $MaxSteps; $step++) {
         $handoffPath = Join-Path $runDir 'handoff.json'
         Write-GearboxJson -Value $handoff -Path $handoffPath
         $currentTier = $candidate
+        $state.current_tier=$currentTier; $state.checkpoint='before_next_worker'; Save-RecoveryState $runDir $state
+        Add-RecoveryEvent $runDir 'continuation' @{ tier=$currentTier; step=$step }
         $reviewMode = $false
         continue
     }
@@ -319,11 +367,15 @@ for ($step = 1; $step -le $MaxSteps; $step++) {
             $currentTier = $reviewTier
             $reviewMode = $true
             $reviewDone = $true
+            $state.review_state='started'; $state.checkpoint='before_review'; Save-RecoveryState $runDir $state
+            Add-RecoveryEvent $runDir 'review_started' @{ tier=$reviewTier }
             continue
         }
 
         $finalStatus = 'complete'
         $finalSummary = [string]$result.summary
+        $state.terminal_status='complete'; $state.checkpoint='complete'; $state.review_state=if($reviewDone){'complete'}else{'not_required'}; Save-RecoveryState $runDir $state
+        Add-RecoveryEvent $runDir 'run_completed' @{ step=$step }
         break
     }
 }
@@ -344,6 +396,11 @@ $summary = [pscustomobject]@{
     history = $history
 }
 Write-GearboxJson -Value $summary -Path (Join-Path $runDir 'summary.json')
+
+if ($finalStatus -ne 'complete') {
+    $state.terminal_status=if($finalStatus -eq 'blocked'){'blocked'}else{'failed'}; $state.checkpoint='terminal'; Save-RecoveryState $runDir $state
+    Add-RecoveryEvent $runDir (if($finalStatus -eq 'blocked'){'run_blocked'}else{'run_failed'}) @{ summary=$finalSummary }
+}
 
 if ($finalStatus -eq 'complete') {
     Write-Host "Gearbox COMPLETE: $finalSummary" -ForegroundColor Green

@@ -136,6 +136,8 @@ Get-ChildItem -LiteralPath (Join-Path $root 'scripts') -Filter '*.ps1' -File | F
 
 $runtime = Join-Path $HOME '.codex-gearbox\scripts\gearbox.ps1'
 Add-Check 'installed-runtime' (Test-Path $runtime) $runtime 'recommended'
+Add-Check 'recovery-module' (Test-Path (Join-Path $root 'scripts\recovery.ps1')) 'scripts/recovery.ps1 present' 'required'
+Add-Check 'recovery-format' $true 'run-state.json v1 and events.jsonl are local/optional per run' 'recommended'
 $skillA = Join-Path $HOME '.agents\skills\codex-gearbox\SKILL.md'
 $skillB = Join-Path $HOME '.codex\skills\codex-gearbox\SKILL.md'
 Add-Check 'skill-fallback-agents' (Test-Path $skillA) $skillA 'recommended'

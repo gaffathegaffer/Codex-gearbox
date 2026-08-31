@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true, Position = 0)]
-    [string]$Task,
+    [Parameter(Position = 0)]
+    [string]$Task = '',
 
     [ValidateSet('eco','balance','sport','custom')]
     [string]$Profile = 'balance',
@@ -14,7 +14,10 @@ param(
     [string]$VerifyCommand,
     [string]$Sandbox,
     [switch]$NoFinalReview,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$Resume,
+    [string]$InspectRun,
+    [switch]$Json
 )
 
 $runtime = Join-Path $PSScriptRoot 'scripts\gearbox.ps1'
