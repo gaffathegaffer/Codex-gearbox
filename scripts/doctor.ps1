@@ -54,6 +54,8 @@ $codexInfo = $null
 try {
     $codexInfo = Get-CodexVersionInfo
     Add-Check 'codex' $true ($codexInfo.raw + ' @ ' + $codexInfo.path)
+    $distribution = Test-CodexSandboxDistribution $codexInfo.path
+    Add-Check 'codex-sandbox-distribution' $distribution.sandbox_ready ($(if ($distribution.sandbox_ready) { 'complete: ' + $distribution.distribution_root } else { 'incomplete; missing: ' + ($distribution.missing_companions -join ', ') }))
     $minimum = [version][string](Get-GearboxConfig).minimum_codex_version
     Add-Check 'codex-gpt56-minimum' ($null -ne $codexInfo.version -and $codexInfo.version -ge $minimum) ("minimum=$minimum; installed=$($codexInfo.version)")
 

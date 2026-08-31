@@ -42,6 +42,35 @@ function Get-GearboxConfig {
     return $config
 }
 
+function Test-CodexSandboxDistribution {
+    param([Parameter(Mandatory=$true)][string]$CodexPath)
+    $cli = (Resolve-Path -LiteralPath $CodexPath -ErrorAction Stop).Path
+    $root = Split-Path -Parent $cli
+    $required = @(
+        'codex-windows-sandbox-setup.exe',
+        'codex-command-runner.exe',
+        'codex-code-mode-host.exe'
+    )
+    $paths = [ordered]@{}
+    $missing = New-Object System.Collections.ArrayList
+    foreach ($name in $required) {
+        $path = Join-Path $root $name
+        $paths[$name] = if (Test-Path -LiteralPath $path -PathType Leaf) { (Resolve-Path -LiteralPath $path).Path } else { $null }
+        if ($null -eq $paths[$name]) { [void]$missing.Add($name) }
+    }
+    [pscustomobject]@{
+        codex = $cli
+        version = $null
+        distribution_root = $root
+        sandbox_ready = ($missing.Count -eq 0)
+        sandbox_setup_helper = $paths['codex-windows-sandbox-setup.exe']
+        command_runner = $paths['codex-command-runner.exe']
+        code_mode_host = $paths['codex-code-mode-host.exe']
+        missing_companions = @($missing)
+        required_companions = $required
+    }
+}
+
 function Get-CodexCommand {
     if ($env:CODEX_CLI_PATH) {
         $explicit = [Environment]::ExpandEnvironmentVariables([string]$env:CODEX_CLI_PATH)
@@ -51,10 +80,34 @@ function Get-CodexCommand {
         throw "CODEX_CLI_PATH was explicitly set but does not resolve to a file: $explicit"
     }
 
+    $candidates = New-Object System.Collections.ArrayList
+    if ($env:LOCALAPPDATA) {
+        $root = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
+        if (Test-Path -LiteralPath $root -PathType Container) {
+            Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | ForEach-Object {
+                $candidate = Join-Path $_.FullName 'codex.exe'
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) { [void]$candidates.Add($candidate) }
+            }
+        }
+    }
+    if ($env:USERPROFILE) {
+        $candidate = Join-Path $env:USERPROFILE '.codex\plugins\.plugin-appserver\codex.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { [void]$candidates.Add($candidate) }
+    }
     $command = Get-Command codex -ErrorAction SilentlyContinue
-    if ($null -eq $command) { throw 'Codex CLI was not found on PATH and CODEX_CLI_PATH did not resolve to a file.' }
-    if ($command.Source) { return $command.Source }
-    return $command.Definition
+    if ($null -ne $command) {
+        $path = if ($command.Source) { $command.Source } else { $command.Definition }
+        if ($path -and $path -notmatch '(?i)(^|\\)WindowsApps(\\|$)') { [void]$candidates.Add($path) }
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        try {
+            if ((Test-CodexSandboxDistribution $candidate).sandbox_ready) { return (Resolve-Path -LiteralPath $candidate).Path }
+        } catch { }
+    }
+    if ($candidates.Count -gt 0) {
+        throw 'Codex CLI candidates were found, but no complete Windows sandbox distribution was found. Set CODEX_CLI_PATH to a complete Codex distribution.'
+    }
+    throw 'Codex CLI was not found on PATH and CODEX_CLI_PATH did not resolve to a file.'
 }
 
 function Get-Tier {

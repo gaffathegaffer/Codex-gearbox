@@ -113,12 +113,8 @@ foreach ($entry in $pathEntries) {
     }
 }
 $childPath = (@($safePathEntries) -join ';')
-$helper = Resolve-CodexSandboxHelper $codex
-if ($helper.helper_exists) {
-    $helperDir = Split-Path -Parent $helper.helper_path
-    if (-not ($safePathEntries -contains $helperDir)) { [void]$safePathEntries.Add($helperDir) }
-    $childPath = (@($safePathEntries) -join ';')
-}
+$distribution = Test-CodexSandboxDistribution $codex
+$distribution.version = (Get-CodexVersionInfo).version
 
 function Resolve-ExecutableFromPath {
     param(
@@ -152,15 +148,42 @@ $preflight = [ordered]@{
     child_path = $childPath
     child_pwsh = Resolve-ExecutableFromPath -Name 'pwsh' -PathValue $childPath
     child_powershell = Resolve-ExecutableFromPath -Name 'powershell' -PathValue $childPath
-    sandbox_helper = $helper.helper_path
-    sandbox_helper_expected = $helper.expected_path
-    sandbox_helper_exists = $helper.helper_exists
-    sandbox_helper_adjacent = $helper.helper_is_adjacent
-    sandbox_helper_candidates = $helper.candidates
-    sandbox_helper_path_added = ($helper.helper_exists -and -not $helper.helper_is_adjacent)
+    distribution_root = $distribution.distribution_root
+    codex_version = $distribution.version
+    sandbox_ready = $distribution.sandbox_ready
+    sandbox_setup_helper = $distribution.sandbox_setup_helper
+    command_runner = $distribution.command_runner
+    code_mode_host = $distribution.code_mode_host
+    missing_companions = $distribution.missing_companions
+    explicit_codex_cli_path = [bool]$env:CODEX_CLI_PATH
+    sandbox_helper = $distribution.sandbox_setup_helper
+    sandbox_helper_expected = Join-Path $distribution.distribution_root 'codex-windows-sandbox-setup.exe'
+    sandbox_helper_exists = ($null -ne $distribution.sandbox_setup_helper)
+    sandbox_helper_adjacent = ($null -ne $distribution.sandbox_setup_helper)
+    sandbox_helper_candidates = @($distribution.sandbox_setup_helper)
+    sandbox_helper_path_added = $false
     workaround = 'child-path-windowsapps-filter'
 }
 $preflight | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $preflightPath -Encoding UTF8
+
+if (-not $distribution.sandbox_ready) {
+    $result = [pscustomobject]@{
+        status = 'blocked'
+        summary = 'Codex executable found, but its distribution is incomplete for Windows sandbox workers.'
+        verification = @('Sandbox worker was refused before Codex model execution.')
+        changed_files = @()
+        unresolved = ('Missing companion binaries: ' + ($distribution.missing_companions -join ', '))
+        recommended_next_tier = $null
+        risk = 'high'
+        confidence = 1
+        should_review = $false
+        failure_signature = 'incomplete_codex_distribution'
+        next_action = 'Set CODEX_CLI_PATH to a complete Codex distribution containing the required adjacent companion binaries.'
+    }
+    $wrapper = [pscustomobject]@{ tier=$TierId; model=[string]$tier.model; reasoning=[string]$tier.reasoning; codex_exit_code=0; result=$result; parse_error=$null; stderr_tail=''; step_dir=$StepDir; shell_preflight=$preflight }
+    $wrapper | ConvertTo-Json -Depth 20 -Compress
+    return
+}
 
 $exitCode = 1
 try {
