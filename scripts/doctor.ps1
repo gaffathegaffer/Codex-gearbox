@@ -13,6 +13,31 @@ function Add-Check {
     [void]$checks.Add([pscustomobject]@{ name=$Name; ok=$Ok; level=$Level; detail=$Detail })
 }
 
+function Get-OptionalPropertyValue {
+    param(
+        [Parameter(Mandatory=$false)]$Object,
+        [Parameter(Mandatory=$true)][string[]]$Names
+    )
+    if ($null -eq $Object) { return $null }
+    foreach ($name in $Names) {
+        $property = $Object.PSObject.Properties[$name]
+        if ($null -ne $property) { return $property.Value }
+    }
+    return $null
+}
+
+function Test-ModelIdentity {
+    param(
+        [Parameter(Mandatory=$true)]$Model,
+        [Parameter(Mandatory=$true)][string]$Expected
+    )
+    foreach ($name in @('slug','model','id')) {
+        $property = $Model.PSObject.Properties[$name]
+        if ($null -ne $property -and [string]$property.Value -eq $Expected) { return $true }
+    }
+    return $false
+}
+
 Add-Check 'windows' ($env:OS -eq 'Windows_NT') ("OS=" + [string]$env:OS) 'recommended'
 Add-Check 'powershell' ($PSVersionTable.PSVersion.Major -ge 5) ("PowerShell=" + $PSVersionTable.PSVersion.ToString())
 
@@ -41,15 +66,21 @@ try {
         $catalogText = (& $codexInfo.path debug models 2>$null | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $catalogText) {
             $catalog = $catalogText | ConvertFrom-Json
-            $models = if ($catalog -is [System.Array]) { @($catalog) } elseif ($catalog.PSObject.Properties['models']) { @($catalog.models) } else { @() }
+            $models = @()
+            if ($catalog -is [System.Array]) {
+                $models = @($catalog)
+            }
+            else {
+                $modelsValue = Get-OptionalPropertyValue -Object $catalog -Names @('models')
+                if ($null -ne $modelsValue) { $models = @($modelsValue) }
+            }
+
             foreach ($slug in @('gpt-5.6-luna','gpt-5.6-terra','gpt-5.6-sol')) {
-                $model = $models | Where-Object {
-                    ($_.slug -eq $slug) -or ($_.model -eq $slug) -or ($_.id -eq $slug)
-                } | Select-Object -First 1
+                $model = $models | Where-Object { Test-ModelIdentity -Model $_ -Expected $slug } | Select-Object -First 1
                 Add-Check ("model-catalog:$slug") ($null -ne $model) ($(if ($model) { 'available in local Codex model catalog' } else { 'not found in local Codex model catalog' })) 'recommended'
             }
 
-            $sol = $models | Where-Object { ($_.slug -eq 'gpt-5.6-sol') -or ($_.model -eq 'gpt-5.6-sol') -or ($_.id -eq 'gpt-5.6-sol') } | Select-Object -First 1
+            $sol = $models | Where-Object { Test-ModelIdentity -Model $_ -Expected 'gpt-5.6-sol' } | Select-Object -First 1
             if ($sol) {
                 $solText = ($sol | ConvertTo-Json -Depth 20 -Compress)
                 Add-Check 'model-catalog:sol-ultra' ($solText -match 'ultra') ($(if ($solText -match 'ultra') { 'Sol Ultra advertised by local catalog.' } else { 'Sol Ultra not advertised by this local catalog; keep it opt-in and do not use until supported.' })) 'optional'
@@ -67,13 +98,27 @@ catch {
     Add-Check 'codex' $false $_.Exception.Message
 }
 
-foreach ($jsonPath in @('config\gearbox.json','schemas\worker-result.schema.json','.agents\plugins\marketplace.json','plugins\codex-gearbox\.codex-plugin\plugin.json')) {
+foreach ($jsonPath in @('config\gearbox.json','schemas\worker-result.schema.json')) {
     $full = Join-Path $root $jsonPath
     try {
         Get-Content -LiteralPath $full -Raw | ConvertFrom-Json | Out-Null
         Add-Check ("json:$jsonPath") $true 'valid JSON'
     }
     catch { Add-Check ("json:$jsonPath") $false $_.Exception.Message }
+}
+
+foreach ($jsonPath in @('.agents\plugins\marketplace.json','plugins\codex-gearbox\.codex-plugin\plugin.json')) {
+    $full = Join-Path $root $jsonPath
+    if (Test-Path -LiteralPath $full) {
+        try {
+            Get-Content -LiteralPath $full -Raw | ConvertFrom-Json | Out-Null
+            Add-Check ("json:$jsonPath") $true 'valid JSON at source checkout path' 'recommended'
+        }
+        catch { Add-Check ("json:$jsonPath") $false $_.Exception.Message 'recommended' }
+    }
+    else {
+        Add-Check ("json:$jsonPath") $true 'not bundled in slim installed runtime; validate from the source checkout when present' 'optional'
+    }
 }
 
 $parseErrors = @()

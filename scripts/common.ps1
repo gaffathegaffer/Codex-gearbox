@@ -43,8 +43,15 @@ function Get-GearboxConfig {
 }
 
 function Get-CodexCommand {
+    if ($env:CODEX_CLI_PATH) {
+        $explicit = [Environment]::ExpandEnvironmentVariables([string]$env:CODEX_CLI_PATH)
+        if (Test-Path -LiteralPath $explicit -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $explicit).Path
+        }
+    }
+
     $command = Get-Command codex -ErrorAction SilentlyContinue
-    if ($null -eq $command) { throw 'Codex CLI was not found on PATH.' }
+    if ($null -eq $command) { throw 'Codex CLI was not found on PATH and CODEX_CLI_PATH did not resolve to a file.' }
     if ($command.Source) { return $command.Source }
     return $command.Definition
 }
