@@ -8,18 +8,34 @@ function Write-GearboxJsonAtomic {
     $parent = Split-Path -Parent $Path
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     $tmp = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    $backup = "$Path.$([guid]::NewGuid().ToString('N')).bak"
     try {
         $Value | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $tmp -Encoding UTF8
         Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json | Out-Null
-        Move-Item -LiteralPath $tmp -Destination $Path -Force
-    } finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            [System.IO.File]::Replace($tmp, $Path, $backup, $true)
+        }
+        else {
+            [System.IO.File]::Move($tmp, $Path)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 function Add-RecoveryEvent {
     param([Parameter(Mandatory=$true)][string]$RunDir,[Parameter(Mandatory=$true)][string]$Type,[hashtable]$Data=@{})
     $event = [ordered]@{ event_id = [guid]::NewGuid().ToString('N'); at = (Get-Date).ToString('o'); type = $Type }
     foreach ($key in $Data.Keys) { $event[$key] = $Data[$key] }
-    Add-Content -LiteralPath (Get-RecoveryEventsPath $RunDir) -Value (($event | ConvertTo-Json -Compress -Depth 15)) -Encoding UTF8
+    try {
+        Add-Content -LiteralPath (Get-RecoveryEventsPath $RunDir) -Value (($event | ConvertTo-Json -Compress -Depth 15)) -Encoding UTF8
+        return $true
+    }
+    catch {
+        Write-Warning "Could not append recovery event '$Type': $($_.Exception.Message)"
+        return $false
+    }
 }
 
 function Get-WorkspaceFingerprint {
@@ -47,6 +63,7 @@ function Compare-WorkspaceFingerprint {
     try { $actual=Get-WorkspaceFingerprint $Workdir } catch { return [pscustomobject]@{ safe=$false; reason='fingerprint_failed'; current=$null } }
     if ($Expected.kind -ne $actual.kind -or $Expected.root -ne $actual.root) { return [pscustomobject]@{ safe=$false; reason='workdir_identity_changed'; current=$actual } }
     if ($Expected.kind -eq 'git' -and $Expected.head -ne $actual.head) { return [pscustomobject]@{ safe=$false; reason='git_head_changed'; current=$actual } }
+    if ($Expected.kind -eq 'git' -and $Expected.branch -ne $actual.branch) { return [pscustomobject]@{ safe=$false; reason='git_branch_changed'; current=$actual } }
     if ($Expected.kind -eq 'git' -and $Expected.status_hash -ne $actual.status_hash) { return [pscustomobject]@{ safe=$false; reason='workspace_status_changed'; current=$actual } }
     if ($Expected.kind -eq 'filesystem' -and $Expected.status_hash -ne $actual.status_hash) { return [pscustomobject]@{ safe=$false; reason='filesystem_fingerprint_changed'; current=$actual } }
     [pscustomobject]@{ safe=$true; reason='unchanged'; current=$actual }
@@ -73,13 +90,20 @@ function Get-ResumeAssessment { param([Parameter(Mandatory=$true)]$State,[Parame
     $cmp=Compare-WorkspaceFingerprint $State.workspace_fingerprint $State.workdir
     if (-not $cmp.safe) { return [pscustomobject]@{ resumable=$false; reason=$cmp.reason; checkpoint=$State.checkpoint } }
     if ($State.checkpoint -eq 'worker_started') { return [pscustomobject]@{ resumable=$false; reason='worker_outcome_unknown'; checkpoint=$State.checkpoint } }
+    if ($State.checkpoint -eq 'after_worker_result' -or $State.checkpoint -eq 'before_review') { return [pscustomobject]@{ resumable=$false; reason='persisted_worker_decision_not_replayable'; checkpoint=$State.checkpoint } }
     [pscustomobject]@{ resumable=$true; reason='safe_checkpoint'; checkpoint=$State.checkpoint }
 }
 
 function Show-RecoveryInspection {
     param([Parameter(Mandatory=$true)][string]$RunDir,[switch]$Json)
     $s=Read-RecoveryState $RunDir; $a=Get-ResumeAssessment $s $RunDir; $ev=@(); $ep=Get-RecoveryEventsPath $RunDir
-    if (Test-Path $ep) { $ev=@(Get-Content $ep | Select-Object -Last 1 | ForEach-Object { $_ | ConvertFrom-Json }) }
+    if (Test-Path $ep) {
+        $lines = @(Get-Content $ep | Select-Object -Last 20)
+        [array]::Reverse($lines)
+        foreach ($line in $lines) {
+            try { $ev=@($line | ConvertFrom-Json); break } catch { }
+        }
+    }
     $o=[pscustomobject]@{ run_id=$s.run_id; status=$s.terminal_status; profile=$s.profile; latest_tier=$s.current_tier; workers=@($s.worker_history).Count; escalation_count=$s.escalation_count; latest_event=if($ev){$ev[0].type}else{$null}; workdir=$s.workdir; fingerprint_status=$a.reason; resumable=$a.resumable; resume_reason=$a.reason }
     if ($Json) { $o | ConvertTo-Json -Depth 10 } else { $o | Format-List }
     $o
