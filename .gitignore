@@ -1,0 +1,6 @@
+.gearbox/
+config/gearbox.local.json
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db

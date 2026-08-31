@@ -1,0 +1,29 @@
+{
+  "name": "codex-gearbox",
+  "version": "1.0.0",
+  "description": "Adaptive Eco/Balance/Sport model routing for Codex CLI workloads.",
+  "author": {
+    "name": "gaffathegaffer",
+    "url": "https://github.com/gaffathegaffer"
+  },
+  "homepage": "https://github.com/gaffathegaffer/Codex-gearbox",
+  "repository": "https://github.com/gaffathegaffer/Codex-gearbox",
+  "license": "MIT",
+  "keywords": ["codex", "routing", "gpt-5.6", "luna", "terra", "sol", "automation", "quota"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Gearbox",
+    "shortDescription": "Adaptive Eco, Balance and Sport routing",
+    "longDescription": "Route Codex tasks across GPT-5.6 Luna, Terra and Sol with bounded reasoning levels, structured handoffs, escalation budgets and optional final review.",
+    "developerName": "gaffathegaffer",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "websiteURL": "https://github.com/gaffathegaffer/Codex-gearbox",
+    "defaultPrompt": [
+      "Use Gearbox balance for this task",
+      "Run this task in Gearbox eco mode",
+      "Use Gearbox sport with Sol High as the ceiling"
+    ],
+    "screenshots": []
+  }
+}

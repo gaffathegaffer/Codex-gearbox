@@ -1,0 +1,110 @@
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+
+function Get-GearboxRoot {
+    return (Split-Path -Parent $PSScriptRoot)
+}
+
+function Merge-GearboxObject {
+    param([Parameter(Mandatory=$true)]$Base, [Parameter(Mandatory=$true)]$Override)
+
+    foreach ($property in $Override.PSObject.Properties) {
+        $name = $property.Name
+        $incoming = $property.Value
+        $existingProperty = $Base.PSObject.Properties[$name]
+
+        if ($null -ne $existingProperty -and
+            $existingProperty.Value -is [pscustomobject] -and
+            $incoming -is [pscustomobject]) {
+            Merge-GearboxObject -Base $existingProperty.Value -Override $incoming | Out-Null
+        }
+        elseif ($null -ne $existingProperty) {
+            $Base.$name = $incoming
+        }
+        else {
+            $Base | Add-Member -NotePropertyName $name -NotePropertyValue $incoming
+        }
+    }
+    return $Base
+}
+
+function Get-GearboxConfig {
+    $root = Get-GearboxRoot
+    $defaultPath = Join-Path $root 'config\gearbox.json'
+    if (-not (Test-Path $defaultPath)) { throw "Missing Gearbox config: $defaultPath" }
+
+    $config = Get-Content -LiteralPath $defaultPath -Raw | ConvertFrom-Json
+    $localPath = Join-Path $root 'config\gearbox.local.json'
+    if (Test-Path $localPath) {
+        $local = Get-Content -LiteralPath $localPath -Raw | ConvertFrom-Json
+        $config = Merge-GearboxObject -Base $config -Override $local
+    }
+    return $config
+}
+
+function Get-CodexCommand {
+    $command = Get-Command codex -ErrorAction SilentlyContinue
+    if ($null -eq $command) { throw 'Codex CLI was not found on PATH.' }
+    if ($command.Source) { return $command.Source }
+    return $command.Definition
+}
+
+function Get-Tier {
+    param([Parameter(Mandatory=$true)]$Config, [Parameter(Mandatory=$true)][string]$TierId)
+    $tier = $Config.tiers | Where-Object { $_.id -eq $TierId } | Select-Object -First 1
+    if ($null -eq $tier) { throw "Unknown Gearbox tier: $TierId" }
+    return $tier
+}
+
+function Get-TierIndex {
+    param([Parameter(Mandatory=$true)]$Config, [Parameter(Mandatory=$true)][string]$TierId)
+    for ($i = 0; $i -lt $Config.tiers.Count; $i++) {
+        if ($Config.tiers[$i].id -eq $TierId) { return $i }
+    }
+    throw "Unknown Gearbox tier: $TierId"
+}
+
+function Clamp-Tier {
+    param(
+        [Parameter(Mandatory=$true)]$Config,
+        [Parameter(Mandatory=$true)][string]$TierId,
+        [Parameter(Mandatory=$true)][string]$MinTier,
+        [Parameter(Mandatory=$true)][string]$MaxTier
+    )
+    $index = Get-TierIndex -Config $Config -TierId $TierId
+    $minIndex = Get-TierIndex -Config $Config -TierId $MinTier
+    $maxIndex = Get-TierIndex -Config $Config -TierId $MaxTier
+    if ($minIndex -gt $maxIndex) { throw "MinTier '$MinTier' is above MaxTier '$MaxTier'." }
+    if ($index -lt $minIndex) { return $MinTier }
+    if ($index -gt $maxIndex) { return $MaxTier }
+    return $TierId
+}
+
+function Get-NextHigherTier {
+    param(
+        [Parameter(Mandatory=$true)]$Config,
+        [Parameter(Mandatory=$true)][string]$CurrentTier,
+        [Parameter(Mandatory=$true)][string]$MaxTier
+    )
+    $current = Get-TierIndex -Config $Config -TierId $CurrentTier
+    $max = Get-TierIndex -Config $Config -TierId $MaxTier
+    if ($current -ge $max) { return $null }
+    return $Config.tiers[$current + 1].id
+}
+
+function Write-GearboxJson {
+    param([Parameter(Mandatory=$true)]$Value, [Parameter(Mandatory=$true)][string]$Path)
+    $parent = Split-Path -Parent $Path
+    if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    $Value | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+function Get-CodexVersionInfo {
+    $codex = Get-CodexCommand
+    $text = (& $codex --version 2>&1 | Out-String).Trim()
+    $version = $null
+    if ($text -match '(\d+\.\d+\.\d+)') {
+        $version = [version]$Matches[1]
+    }
+    return [pscustomobject]@{ path = $codex; raw = $text; version = $version }
+}

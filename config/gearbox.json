@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "default_profile": "balance",
+  "minimum_codex_version": "0.144.0",
+  "sandbox": "workspace-write",
+  "context_char_limit": 24000,
+  "tiers": [
+    {"id":"luna-low","model":"gpt-5.6-luna","reasoning":"low"},
+    {"id":"luna-medium","model":"gpt-5.6-luna","reasoning":"medium"},
+    {"id":"luna-high","model":"gpt-5.6-luna","reasoning":"high"},
+    {"id":"terra-medium","model":"gpt-5.6-terra","reasoning":"medium"},
+    {"id":"terra-high","model":"gpt-5.6-terra","reasoning":"high"},
+    {"id":"sol-medium","model":"gpt-5.6-sol","reasoning":"medium"},
+    {"id":"sol-high","model":"gpt-5.6-sol","reasoning":"high"},
+    {"id":"sol-xhigh","model":"gpt-5.6-sol","reasoning":"xhigh"},
+    {"id":"sol-max","model":"gpt-5.6-sol","reasoning":"max"}
+  ],
+  "profiles": {
+    "eco": {
+      "min_tier": "luna-low",
+      "start_tier": "luna-medium",
+      "max_tier": "terra-high",
+      "max_steps": 3,
+      "max_escalations": 1,
+      "final_review": "never",
+      "review_tier": "terra-high"
+    },
+    "balance": {
+      "min_tier": "luna-low",
+      "start_tier": "luna-medium",
+      "max_tier": "sol-high",
+      "max_steps": 4,
+      "max_escalations": 2,
+      "final_review": "risk",
+      "review_tier": "sol-high"
+    },
+    "sport": {
+      "min_tier": "terra-medium",
+      "start_tier": "terra-medium",
+      "max_tier": "sol-max",
+      "max_steps": 5,
+      "max_escalations": 3,
+      "final_review": "always",
+      "review_tier": "sol-high"
+    },
+    "custom": {
+      "min_tier": "luna-low",
+      "start_tier": "luna-medium",
+      "max_tier": "sol-high",
+      "max_steps": 4,
+      "max_escalations": 2,
+      "final_review": "risk",
+      "review_tier": "sol-high"
+    }
+  }
+}

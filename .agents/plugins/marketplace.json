@@ -1,0 +1,21 @@
+{
+  "name": "gaffa-codex-gearbox",
+  "interface": {
+    "displayName": "Gaffa Codex Gearbox"
+  },
+  "plugins": [
+    {
+      "name": "codex-gearbox",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-gearbox"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL",
+        "products": ["CODEX"]
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
