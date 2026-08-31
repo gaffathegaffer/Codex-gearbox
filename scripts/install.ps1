@@ -72,3 +72,7 @@ Write-Host 'A new Codex thread/restart may be needed once for plugin/skill index
     skill_fallbacks = $fallbacks
     default_profile = [string]$config.default_profile
 } | ConvertTo-Json -Depth 8
+
+# Plugin support is optional because the skill fallbacks and runtime are sufficient.
+# Make the script's process result reflect the required installation, not a prior optional CLI probe.
+exit 0

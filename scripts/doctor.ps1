@@ -15,7 +15,15 @@ function Add-Check {
 
 Add-Check 'windows' ($env:OS -eq 'Windows_NT') ("OS=" + [string]$env:OS) 'recommended'
 Add-Check 'powershell' ($PSVersionTable.PSVersion.Major -ge 5) ("PowerShell=" + $PSVersionTable.PSVersion.ToString())
-Add-Check 'git' ($null -ne (Get-Command git -ErrorAction SilentlyContinue)) ((& git --version 2>&1 | Out-String).Trim())
+
+$gitCommand = Get-Command git -ErrorAction SilentlyContinue
+if ($null -ne $gitCommand) {
+    $gitVersion = (& git --version 2>&1 | Out-String).Trim()
+    Add-Check 'git' $true $gitVersion
+}
+else {
+    Add-Check 'git' $false 'Git was not found on PATH.'
+}
 
 $codexInfo = $null
 try {
@@ -27,6 +35,32 @@ try {
     $help = (& $codexInfo.path exec --help 2>&1 | Out-String)
     foreach ($flag in @('--model','--output-schema','--output-last-message','--sandbox')) {
         Add-Check ("codex-exec-$flag") ($help -match [regex]::Escape($flag)) 'present in codex exec --help'
+    }
+
+    try {
+        $catalogText = (& $codexInfo.path debug models 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -eq 0 -and $catalogText) {
+            $catalog = $catalogText | ConvertFrom-Json
+            $models = if ($catalog -is [System.Array]) { @($catalog) } elseif ($catalog.PSObject.Properties['models']) { @($catalog.models) } else { @() }
+            foreach ($slug in @('gpt-5.6-luna','gpt-5.6-terra','gpt-5.6-sol')) {
+                $model = $models | Where-Object {
+                    ($_.slug -eq $slug) -or ($_.model -eq $slug) -or ($_.id -eq $slug)
+                } | Select-Object -First 1
+                Add-Check ("model-catalog:$slug") ($null -ne $model) ($(if ($model) { 'available in local Codex model catalog' } else { 'not found in local Codex model catalog' })) 'recommended'
+            }
+
+            $sol = $models | Where-Object { ($_.slug -eq 'gpt-5.6-sol') -or ($_.model -eq 'gpt-5.6-sol') -or ($_.id -eq 'gpt-5.6-sol') } | Select-Object -First 1
+            if ($sol) {
+                $solText = ($sol | ConvertTo-Json -Depth 20 -Compress)
+                Add-Check 'model-catalog:sol-ultra' ($solText -match 'ultra') ($(if ($solText -match 'ultra') { 'Sol Ultra advertised by local catalog.' } else { 'Sol Ultra not advertised by this local catalog; keep it opt-in and do not use until supported.' })) 'optional'
+            }
+        }
+        else {
+            Add-Check 'model-catalog' $false '`codex debug models` unavailable or returned no data.' 'optional'
+        }
+    }
+    catch {
+        Add-Check 'model-catalog' $false ('Could not inspect local model catalog: ' + $_.Exception.Message) 'optional'
     }
 }
 catch {
@@ -104,7 +138,9 @@ else {
         $tag = if ($check.ok) { 'OK' } else { if ($check.level -eq 'required') { 'FAIL' } else { 'WARN' } }
         Write-Host ("[{0}] {1}: {2}" -f $tag,$check.name,$check.detail)
     }
-    Write-Host (if ($report.ok) { 'READY' } else { 'NOT READY' }) -ForegroundColor $(if ($report.ok) { 'Green' } else { 'Red' })
+    $readyText = if ($report.ok) { 'READY' } else { 'NOT READY' }
+    $readyColor = if ($report.ok) { 'Green' } else { 'Red' }
+    Write-Host $readyText -ForegroundColor $readyColor
 }
 
 if ($report.ok) { exit 0 } else { exit 1 }

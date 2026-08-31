@@ -15,6 +15,7 @@ Use the installed Gearbox runtime instead of manually simulating adaptive routin
 - Respect explicit `MinTier` and `MaxTier` bounds exactly. Never exceed the user's ceiling.
 - `workspace-write` is the default sandbox. Never silently switch to `danger-full-access` / `--yolo`.
 - Preserve local and uncommitted work. Never run destructive Git cleanup as part of routing.
+- `sol-ultra` is an explicit opt-in ceiling. Never select Ultra unless the user requested `-MaxTier sol-ultra` (or set an equivalent local override) and the installed Codex model catalog advertises Ultra support.
 
 ## Find the runtime
 
@@ -40,12 +41,19 @@ If that file is missing but the current repository is Codex Gearbox, use its roo
 & $gearbox -Profile sport -MinTier terra-medium -MaxTier sol-high -Task "Audit and improve this implementation" -Workdir "C:\path\to\repo"
 ```
 
+```powershell
+# Explicit nuclear option. Ultra is never selected by the built-in profiles on its own.
+& $gearbox -Profile sport -MaxTier sol-ultra -Task "Deeply audit this unusually complex system" -Workdir "C:\path\to\repo"
+```
+
 ## Profile intent
 
 - `eco`: optimize for quota. Start on Luna and escalate reluctantly. Default ceiling is Terra High.
 - `balance`: optimize capability per unit of usage. Start on Luna Medium and permit escalation through Sol High when evidence justifies it.
 - `sport`: optimize quality. Start on Terra Medium and permit Sol up to Max, while still handing mechanical follow-up down when possible.
 - `custom`: only use when the user supplied explicit routing requirements or the task genuinely needs non-default bounds.
+
+Ultra is intentionally outside all built-in default ceilings. It can consume substantially more work through high reasoning and orchestration behavior, so the user must opt in.
 
 ## Do not waste the parent model
 

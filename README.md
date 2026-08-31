@@ -11,8 +11,8 @@ Codex Gearbox adds an `eco / balance / sport` layer above `codex exec`. Instead 
 - Routes work between GPT-5.6 Luna, Terra, and Sol.
 - Controls reasoning effort independently from model choice.
 - Provides `eco`, `balance`, `sport`, and `custom` profiles.
-- Supports explicit minimum and maximum tiers.
-- Uses structured worker results to decide whether to complete, escalate, retry, or stop.
+- Supports explicit minimum and maximum tiers, including an opt-in `sol-ultra` ceiling.
+- Uses structured worker results to decide whether to complete, escalate, retry, continue, or stop.
 - Carries compact handoff context between workers instead of forcing every stronger model to rediscover the entire task.
 - Records run metadata, decisions, outputs, and verification state under `.gearbox/`.
 - Preserves the user's working tree. Gearbox never runs destructive Git cleanup commands on its own.
@@ -43,6 +43,8 @@ phone / Codex Remote
 | `balance` | Luna / medium | Sol / high | Default. Escalate when evidence says it is useful. |
 | `sport` | Terra / medium | Sol / max | Quality-first, but still avoids using the strongest tier for mechanical work. |
 | `custom` | user supplied | user supplied | Explicit floor, ceiling, budgets, and review behavior. |
+
+**Sol Ultra is deliberately outside the built-in profile ceilings.** To permit it for a particular workload, explicitly pass `-MaxTier sol-ultra`. This makes the most expensive/orchestrated mode an opt-in rather than something Gearbox can silently wander into.
 
 The exact tier table lives in `config/gearbox.json` and can be edited without changing the router code.
 
@@ -94,6 +96,9 @@ Useful examples:
 # Quality-first with a lower floor
 & .\scripts\gearbox.ps1 -Profile sport -MinTier terra-medium -Task "Audit this refactor, fix regressions, and verify it" -Workdir C:\repo
 
+# Explicitly permit Ultra for an exceptional job
+& .\scripts\gearbox.ps1 -Profile sport -MaxTier sol-ultra -Task "Deeply audit this unusually complex system" -Workdir C:\repo
+
 # See the plan without spending Codex usage
 & .\scripts\gearbox.ps1 -Profile balance -DryRun -Task "Refactor the data layer" -Workdir C:\repo
 ```
@@ -110,7 +115,7 @@ Gearbox also refuses to automate destructive Git cleanup (`git reset --hard`, `g
 
 Each worker receives the original goal plus a compact handoff packet. Its final response is constrained by `schemas/worker-result.schema.json` and includes:
 
-- `status`: `complete`, `escalate`, or `blocked`
+- `status`: `complete`, `continue`, `escalate`, or `blocked`
 - a concise summary of work performed
 - verification evidence
 - unresolved problem / escalation reason
@@ -173,6 +178,7 @@ config/gearbox.json
 schemas/worker-result.schema.json
 scripts/
   bootstrap.ps1
+  common.ps1
   doctor.ps1
   install.ps1
   gearbox.ps1

@@ -34,7 +34,7 @@
     "unresolved": {"type": "string"},
     "recommended_next_tier": {
       "type": ["string", "null"],
-      "enum": [null, "luna-low", "luna-medium", "luna-high", "terra-medium", "terra-high", "sol-medium", "sol-high", "sol-xhigh", "sol-max"]
+      "enum": [null, "luna-low", "luna-medium", "luna-high", "terra-medium", "terra-high", "sol-medium", "sol-high", "sol-xhigh", "sol-max", "sol-ultra"]
     },
     "risk": {
       "type": "string",
