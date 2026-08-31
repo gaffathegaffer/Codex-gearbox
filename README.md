@@ -57,6 +57,10 @@ Use the installed or checkout entry point with `-InspectRun <run-id>` to inspect
 
 The Git fingerprint records repository root, HEAD, branch, dirty status hash, and status count; it is a change detector, not a full repository archive, and cannot detect every semantic change outside Git's status model. Non-Git workdirs use a lightweight top-level file name/size/mtime fingerprint. Recovery is deliberately conservative: when Gearbox cannot establish continuity it refuses to resume rather than guessing.
 
+## Codex sandbox bootstrap diagnostics
+
+Worker preflight now resolves `codex-windows-sandbox-setup.exe` before launching Codex. An explicit valid `CODEX_CLI_PATH` remains authoritative. If its own directory lacks the helper, Gearbox searches the local AppData Codex bin directories and the plugin companion directory for an existing helper and adds only that helper directory to the child PATH. It never copies binaries, disables the sandbox, changes ACLs, or restores the removed WindowsApps entries. `shell-preflight.json` records the expected helper path, selected helper, candidates, and whether a companion directory was added. A missing helper remains a preflight failure condition to diagnose rather than silently hiding an invalid explicit CLI path.
+
 ## Requirements
 
 - Windows 10/11

@@ -195,12 +195,13 @@ for ($step = ($(if($resumeState){[int]$resumeState.current_step + 1}else{1})); $
     }
     [void]$history.Add($record)
     Write-GearboxJson -Value $record -Path (Join-Path $stepDir 'step.json')
-    $state.worker_history=@($history | ForEach-Object { [pscustomobject]@{ step=$_.step; tier=$_.tier; status=if($_.result){$_.result.status}else{'failed'}; reasoning=(Get-Tier -Config $config -TierId $_.tier).reasoning; result_persisted=($null -ne $_.result) } })
+    $state.worker_history=@($history | ForEach-Object { $workerStatus=if($_.result){$_.result.status}else{'failed'}; [pscustomobject]@{ step=$_.step; tier=$_.tier; status=$workerStatus; reasoning=(Get-Tier -Config $config -TierId $_.tier).reasoning; result_persisted=($null -ne $_.result) } })
     $state.verification=@($verification)
     if ($result -and $result.failure_signature) { $state.failure_signature=[string]$result.failure_signature }
     if ($result -and $result.changed_files) { $state.changed_files=@($result.changed_files) }
     $state.checkpoint='after_worker_result'; Save-RecoveryState $runDir $state
-    Add-RecoveryEvent $runDir (if($null -eq $result -or $exitCode -ne 0){'worker_failed'}else{'worker_completed'}) @{ step=$step; tier=$currentTier; status=if($result){$result.status}else{'failed'} }
+    $workerEvent=if($null -eq $result -or $exitCode -ne 0){'worker_failed'}else{'worker_completed'}; $workerStatus=if($result){$result.status}else{'failed'}
+    Add-RecoveryEvent $runDir $workerEvent @{ step=$step; tier=$currentTier; status=$workerStatus }
     try { Test-RecoveryFailureInjection 'after_worker_result' } catch { $state.terminal_status='interrupted'; Save-RecoveryState $runDir $state; Add-RecoveryEvent $runDir 'run_interrupted' @{ checkpoint='after_worker_result' }; throw }
 
     if ($null -eq $result -or $exitCode -ne 0) {
@@ -374,7 +375,7 @@ for ($step = ($(if($resumeState){[int]$resumeState.current_step + 1}else{1})); $
 
         $finalStatus = 'complete'
         $finalSummary = [string]$result.summary
-        $state.terminal_status='complete'; $state.checkpoint='complete'; $state.review_state=if($reviewDone){'complete'}else{'not_required'}; Save-RecoveryState $runDir $state
+        $state.terminal_status='complete'; $state.checkpoint='complete'; $state.review_state=$(if($reviewDone){'complete'}else{'not_required'}); Save-RecoveryState $runDir $state
         Add-RecoveryEvent $runDir 'run_completed' @{ step=$step }
         break
     }
@@ -398,8 +399,8 @@ $summary = [pscustomobject]@{
 Write-GearboxJson -Value $summary -Path (Join-Path $runDir 'summary.json')
 
 if ($finalStatus -ne 'complete') {
-    $state.terminal_status=if($finalStatus -eq 'blocked'){'blocked'}else{'failed'}; $state.checkpoint='terminal'; Save-RecoveryState $runDir $state
-    Add-RecoveryEvent $runDir (if($finalStatus -eq 'blocked'){'run_blocked'}else{'run_failed'}) @{ summary=$finalSummary }
+    $state.terminal_status=$(if($finalStatus -eq 'blocked'){'blocked'}else{'failed'}); $state.checkpoint='terminal'; Save-RecoveryState $runDir $state
+    $terminalEvent=if($finalStatus -eq 'blocked'){'run_blocked'}else{'run_failed'}; Add-RecoveryEvent $runDir $terminalEvent @{ summary=$finalSummary }
 }
 
 if ($finalStatus -eq 'complete') {

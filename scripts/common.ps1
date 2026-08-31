@@ -48,6 +48,7 @@ function Get-CodexCommand {
         if (Test-Path -LiteralPath $explicit -PathType Leaf) {
             return (Resolve-Path -LiteralPath $explicit).Path
         }
+        throw "CODEX_CLI_PATH was explicitly set but does not resolve to a file: $explicit"
     }
 
     $command = Get-Command codex -ErrorAction SilentlyContinue
@@ -114,4 +115,24 @@ function Get-CodexVersionInfo {
         $version = [version]$Matches[1]
     }
     return [pscustomobject]@{ path = $codex; raw = $text; version = $version }
+}
+
+function Get-CodexSandboxHelperCandidates {
+    param([Parameter(Mandatory=$true)][string]$CodexPath)
+    $candidates = New-Object System.Collections.ArrayList
+    [void]$candidates.Add((Join-Path (Split-Path -Parent $CodexPath) 'codex-windows-sandbox-setup.exe'))
+    if ($env:LOCALAPPDATA) {
+        $root = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
+        if (Test-Path $root) { Get-ChildItem $root -Directory -ErrorAction SilentlyContinue | ForEach-Object { [void]$candidates.Add((Join-Path $_.FullName 'codex-windows-sandbox-setup.exe')) } }
+    }
+    if ($env:USERPROFILE) { [void]$candidates.Add((Join-Path $env:USERPROFILE '.codex\plugins\.plugin-appserver\codex-windows-sandbox-setup.exe')) }
+    @($candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -Unique)
+}
+
+function Resolve-CodexSandboxHelper {
+    param([Parameter(Mandatory=$true)][string]$CodexPath)
+    $expected = Join-Path (Split-Path -Parent $CodexPath) 'codex-windows-sandbox-setup.exe'
+    $found = Get-CodexSandboxHelperCandidates $CodexPath
+    $selected = $found | Select-Object -First 1
+    [pscustomobject]@{ cli_path=(Resolve-Path $CodexPath).Path; expected_path=$expected; helper_path=if($selected){(Resolve-Path $selected).Path}else{$null}; helper_exists=($null -ne $selected); helper_is_adjacent=($null -ne $selected -and (Split-Path $selected -Parent) -eq (Split-Path $CodexPath -Parent)); candidates=$found }
 }

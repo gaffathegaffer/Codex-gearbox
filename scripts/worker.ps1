@@ -113,6 +113,12 @@ foreach ($entry in $pathEntries) {
     }
 }
 $childPath = (@($safePathEntries) -join ';')
+$helper = Resolve-CodexSandboxHelper $codex
+if ($helper.helper_exists) {
+    $helperDir = Split-Path -Parent $helper.helper_path
+    if (-not ($safePathEntries -contains $helperDir)) { [void]$safePathEntries.Add($helperDir) }
+    $childPath = (@($safePathEntries) -join ';')
+}
 
 function Resolve-ExecutableFromPath {
     param(
@@ -146,6 +152,12 @@ $preflight = [ordered]@{
     child_path = $childPath
     child_pwsh = Resolve-ExecutableFromPath -Name 'pwsh' -PathValue $childPath
     child_powershell = Resolve-ExecutableFromPath -Name 'powershell' -PathValue $childPath
+    sandbox_helper = $helper.helper_path
+    sandbox_helper_expected = $helper.expected_path
+    sandbox_helper_exists = $helper.helper_exists
+    sandbox_helper_adjacent = $helper.helper_is_adjacent
+    sandbox_helper_candidates = $helper.candidates
+    sandbox_helper_path_added = ($helper.helper_exists -and -not $helper.helper_is_adjacent)
     workaround = 'child-path-windowsapps-filter'
 }
 $preflight | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $preflightPath -Encoding UTF8
