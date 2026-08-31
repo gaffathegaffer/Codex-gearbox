@@ -1,0 +1,55 @@
+name: Validate Codex Gearbox
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-powershell:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate JSON
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem -Recurse -File -Filter *.json | ForEach-Object {
+            Write-Host "Parsing $($_.FullName)"
+            Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json | Out-Null
+          }
+
+      - name: Parse PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $failed = $false
+          Get-ChildItem -Recurse -File -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              Write-Host "Parser errors in $($_.FullName)" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
+            }
+          }
+          if ($failed) { throw 'One or more PowerShell files failed to parse.' }
+
+      - name: Routing dry runs
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\scripts\gearbox.ps1 -Profile eco -DryRun -Task 'Install dependencies and format documentation' -Workdir $PWD.Path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\scripts\gearbox.ps1 -Profile balance -DryRun -Task 'Diagnose a failing integration and fix the regression' -Workdir $PWD.Path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\scripts\gearbox.ps1 -Profile sport -MaxTier sol-ultra -DryRun -Task 'Perform a repository-wide security architecture audit' -Workdir $PWD.Path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\scripts\gearbox.ps1 -Profile custom -MinTier luna-medium -StartTier terra-medium -MaxTier sol-high -DryRun -Task 'Verify explicit floor and ceiling handling' -Workdir $PWD.Path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

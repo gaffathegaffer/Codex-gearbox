@@ -21,6 +21,7 @@ $Workdir = (Resolve-Path $Workdir).Path
 $profileConfig = $config.profiles.$Profile
 if ($null -eq $profileConfig) { throw "Profile not found in config: $Profile" }
 
+$startTierWasExplicit = $PSBoundParameters.ContainsKey('StartTier') -and -not [string]::IsNullOrWhiteSpace($StartTier)
 if (-not $MinTier) { $MinTier = [string]$profileConfig.min_tier }
 if (-not $StartTier) { $StartTier = [string]$profileConfig.start_tier }
 if (-not $MaxTier) { $MaxTier = [string]$profileConfig.max_tier }
@@ -31,6 +32,38 @@ $minIndex = Get-TierIndex -Config $config -TierId $MinTier
 $maxIndex = Get-TierIndex -Config $config -TierId $MaxTier
 if ($minIndex -gt $maxIndex) { throw "MinTier '$MinTier' is above MaxTier '$MaxTier'." }
 $StartTier = Clamp-Tier -Config $config -TierId $StartTier -MinTier $MinTier -MaxTier $MaxTier
+
+$classifier = $null
+if (-not $startTierWasExplicit) {
+    try {
+        $classifierScript = Join-Path $PSScriptRoot 'classify.ps1'
+        $classifierText = & $classifierScript -Task $Task -Workdir $Workdir -BaseTier $StartTier -MinTier $MinTier -MaxTier $MaxTier
+        $classifier = $classifierText | Select-Object -Last 1 | ConvertFrom-Json
+        $StartTier = Clamp-Tier -Config $config -TierId ([string]$classifier.suggested_tier) -MinTier $MinTier -MaxTier $MaxTier
+    }
+    catch {
+        $classifier = [pscustomobject]@{
+            base_tier = $StartTier
+            suggested_tier = $StartTier
+            score = 0
+            offset = 0
+            signals = @('classifier failed; using profile baseline')
+            error = $_.Exception.Message
+            quota_cost = 'none'
+        }
+    }
+}
+else {
+    $classifier = [pscustomobject]@{
+        base_tier = $StartTier
+        suggested_tier = $StartTier
+        score = 0
+        offset = 0
+        signals = @('explicit StartTier disables automatic initial classification')
+        quota_cost = 'none'
+    }
+}
+
 $currentTier = $StartTier
 $maxEscalations = [int]$profileConfig.max_escalations
 
@@ -46,6 +79,7 @@ $plan = [pscustomobject]@{
     review_tier = [string]$profileConfig.review_tier
     sandbox = $Sandbox
     verify_command = $VerifyCommand
+    initial_classifier = $classifier
 }
 
 if ($DryRun) {
@@ -88,11 +122,15 @@ $finalSummary = 'Gearbox stopped without a completion result.'
 $lastResult = $null
 
 Write-Host "Gearbox [$Profile] $StartTier -> $MaxTier" -ForegroundColor Cyan
+if ($classifier.signals -and $classifier.signals.Count -gt 0) {
+    Write-Host ("Initial routing: " + (($classifier.signals | ForEach-Object { [string]$_ }) -join ', ')) -ForegroundColor DarkGray
+}
 
 for ($step = 1; $step -le $MaxSteps; $step++) {
     $stepDir = Join-Path $runDir ('step-{0:d2}' -f $step)
     New-Item -ItemType Directory -Path $stepDir -Force | Out-Null
-    Write-Host ("[{0}/{1}] {2}{3}" -f $step,$MaxSteps,$currentTier,($(if($reviewMode){' [review]'}else{''}))) -ForegroundColor Yellow
+    $modeSuffix = if ($reviewMode) { ' [review]' } else { '' }
+    Write-Host ("[{0}/{1}] {2}{3}" -f $step,$MaxSteps,$currentTier,$modeSuffix) -ForegroundColor Yellow
 
     $workerText = & $workerScript -Task $Task -Workdir $Workdir -TierId $currentTier -MinTier $MinTier -MaxTier $MaxTier -StepDir $stepDir -ContextPath $handoffPath -Sandbox $Sandbox -ReviewMode:$reviewMode
     $wrapper = $null
