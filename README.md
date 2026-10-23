@@ -1,6 +1,6 @@
 # Codex Gearbox
 
-Adaptive model routing for OpenAI Codex on a local machine.
+Adaptive model routing for OpenAI Codex on Linux cloud machines and Windows PCs.
 
 Codex Gearbox adds an `eco / balance / sport` layer above `codex exec`. Instead of running every phase of a task on the most expensive model and reasoning level, Gearbox starts at an appropriate tier, evaluates the result, escalates only when needed, and can hand routine work back down to a cheaper tier.
 
@@ -8,7 +8,7 @@ Codex Gearbox adds an `eco / balance / sport` layer above `codex exec`. Instead 
 
 ## What it does
 
-- Routes work between GPT-5.6 Luna, Terra, and Sol.
+- Routes work between GPT-6 Luna, GPT-6 Sol, and GPT-6.1 Sol.
 - Controls reasoning effort independently from model choice.
 - Provides `eco`, `balance`, `sport`, and `custom` profiles.
 - Supports explicit minimum and maximum tiers, including an opt-in `sol-ultra` ceiling.
@@ -59,17 +59,21 @@ The Git fingerprint records repository root, HEAD, branch, dirty status hash, an
 
 ## Codex sandbox bootstrap diagnostics
 
-Worker preflight validates that the selected Codex executable belongs to a sandbox-ready distribution with adjacent `codex-windows-sandbox-setup.exe`, `codex-command-runner.exe`, and `codex-code-mode-host.exe`. An explicit valid `CODEX_CLI_PATH` remains authoritative, but an incomplete distribution is refused before model execution; Gearbox never assembles a worker from binaries in different distributions. Without an explicit path, discovery prefers complete user-owned AppData/plugin distributions and ignores WindowsApps candidates that are not sandbox-ready. `shell-preflight.json` records distribution root, readiness, companions, missing files, and the separate child-PATH WindowsApps filter. The recommended complete distribution on this machine is `C:\Users\Gaffa\AppData\Local\OpenAI\Codex\bin\d7e8094cfb76a267\codex.exe`; `C:\Users\Gaffa\.codex\.sandbox-bin\codex.exe` is incomplete and is not a worker CLI.
+On Linux, Gearbox discovers the executable `codex` on PATH (or uses `CODEX_CLI_PATH`) and lets Codex enforce its native Unix sandbox. It preserves the colon-separated child PATH. Distribution preflight checks executable permissions; it does not by itself prove that a sandboxed model call will succeed.
+
+On Windows, preflight still requires adjacent `codex-windows-sandbox-setup.exe`, `codex-command-runner.exe`, and `codex-code-mode-host.exe`. It never combines binaries from different distributions. Discovery prefers complete user-owned AppData/plugin distributions and filters WindowsApps only from the child PATH.
+
+Every worker checks the CLI model catalog for its exact model ID and reasoning level before inference. An unavailable model or reasoning level returns a blocked result without silently substituting a different model. `shell-preflight.json` records the platform, distribution and child environment diagnostics.
 
 ## Requirements
 
-- Windows 10/11
-- PowerShell 5.1 or newer
+- Linux with PowerShell 7.4+ (`pwsh`), or Windows 10/11 with PowerShell 5.1+
 - Git
-- OpenAI Codex CLI with ChatGPT or API authentication
-- Codex CLI **0.144.0 or newer** for GPT-5.6 access
+- OpenAI Codex CLI with existing ChatGPT or API authentication; no additional API key is required
+- Codex CLI **0.163.0 or newer**, the validated baseline for this configuration
+- Account access to the configured models, as checked by `codex debug models`
 
-Codex currently exposes non-interactive execution with `codex exec`, a per-run model override with `--model`, configuration overrides with `-c key=value`, JSON-schema-constrained final output with `--output-schema`, and sandbox selection with `--sandbox`.
+The legacy tier IDs remain stable: `luna-*` maps to `gpt-6-luna`, `terra-*` to `gpt-6-sol`, and `sol-*` to `gpt-6.1-sol`. There is no assumed `gpt-6.1-terra` or `gpt-6.1-luna`. Local tier overrides continue to work through `config/gearbox.local.json`.
 
 ## Install
 
@@ -82,6 +86,32 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 & .\scripts\install.ps1
 & .\scripts\doctor.ps1
 ```
+
+### Linux / cloud quick start
+
+Run from the existing checkout; a cloud task already has an isolated workspace.
+
+```bash
+pwsh -NoProfile -File scripts/install.ps1
+pwsh -NoProfile -File scripts/doctor.ps1
+pwsh -NoProfile -File scripts/gearbox.ps1 -Profile balance -DryRun -Task "Check routing"
+```
+
+For managed environments that only allow writes under `/workspace`, install the runtime there and use the checkout skill without changing personal plugin settings:
+
+```bash
+pwsh -NoProfile -File scripts/install.ps1 -InstallRoot /workspace/shared/codex-gearbox -SkipPlugin -SkipSkillFallbacks
+```
+
+If the user's home is read-only, set `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` and `XDG_DATA_HOME` to writable directories before starting `pwsh`. Preserve the platform's existing Codex authentication, proxy and CA settings. No background service is needed. With ChatGPT authentication, network policy must allow HTTPS to `chatgpt.com` for Codex model calls and model catalog refresh. A catalog entry alone does not prove live endpoint access; an HTTP CONNECT 403 is an external network blocker. Gearbox stops on that proxy denial without spending its escalation budget.
+
+A task restricted to GPT-6.1 Sol can use an explicit floor and ceiling:
+
+```bash
+pwsh -NoProfile -File scripts/gearbox.ps1 -Profile custom -MinTier sol-medium -StartTier sol-medium -MaxTier sol-high -Task "Fix the failing tests" -Workdir /workspace/my-project
+```
+
+These task commands start real Codex workers; `-DryRun` only prints a plan.
 
 ## Use
 
@@ -177,6 +207,19 @@ Every routed task gets its own directory:
 ```
 
 `.gearbox/` is ignored by Git by default.
+
+## Validation
+
+Run the JSON and PowerShell parser checks from CI, then:
+
+```bash
+pwsh -NoProfile -File tests/recovery.tests.ps1
+pwsh -NoProfile -File tests/sandbox-bootstrap.tests.ps1
+pwsh -NoProfile -File tests/linux-worker.tests.ps1
+pwsh -NoProfile -File scripts/doctor.ps1
+```
+
+The Linux integration suite uses a deterministic CLI fixture to test discovery, worker arguments and stdin, model availability, native exit codes, stale-output rejection, routing and recovery without consuming model quota. It requires Python 3 and skips on Windows. Windows distribution fixtures are tested on both CI platforms. `doctor.ps1` checks the real CLI and model catalog but only starts inference with explicit `-SmokeTest`.
 
 ## Project layout
 

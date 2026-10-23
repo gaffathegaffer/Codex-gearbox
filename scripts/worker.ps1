@@ -26,6 +26,8 @@ $finalPath = Join-Path $StepDir 'final.json'
 $stdoutPath = Join-Path $StepDir 'stdout.log'
 $stderrPath = Join-Path $StepDir 'stderr.log'
 $preflightPath = Join-Path $StepDir 'shell-preflight.json'
+# A reused step directory must never accept an old successful final message.
+if (Test-Path -LiteralPath $finalPath) { Remove-Item -LiteralPath $finalPath -Force }
 
 $contextText = ''
 if ($ContextPath -and (Test-Path $ContextPath)) {
@@ -100,19 +102,21 @@ $arguments = @(
 # CreateProcessAsUserW failed: 5 (Access is denied). Keep the user's global PATH untouched,
 # but remove WindowsApps entries only from the environment inherited by this child Codex.
 $originalPath = [string]$env:PATH
-$pathEntries = @($originalPath -split ';' | Where-Object { $_ -and $_.Trim() })
+$platform = Get-GearboxPlatform
+$pathSeparator = [IO.Path]::PathSeparator
+$pathEntries = @($originalPath -split [regex]::Escape([string]$pathSeparator) | Where-Object { $_ -and $_.Trim() })
 $removedWindowsApps = New-Object System.Collections.ArrayList
 $safePathEntries = New-Object System.Collections.ArrayList
 foreach ($entry in $pathEntries) {
     $normalized = $entry.Trim().TrimEnd('\')
-    if ($normalized -match '(?i)(^|\\)WindowsApps($|\\)') {
+    if ($platform -eq 'Windows' -and $normalized -match '(?i)(^|\\)WindowsApps($|\\)') {
         [void]$removedWindowsApps.Add($entry)
     }
     else {
         [void]$safePathEntries.Add($entry)
     }
 }
-$childPath = (@($safePathEntries) -join ';')
+$childPath = if ($platform -eq 'Windows') { @($safePathEntries) -join $pathSeparator } else { $originalPath }
 $distribution = Test-CodexSandboxDistribution $codex
 $distribution.version = (Get-CodexVersionInfo).version
 
@@ -123,11 +127,11 @@ function Resolve-ExecutableFromPath {
     )
 
     $extensions = @('')
-    if ([System.IO.Path]::GetExtension($Name) -eq '') {
+    if ($platform -eq 'Windows' -and [System.IO.Path]::GetExtension($Name) -eq '') {
         $extensions = @('.exe','.cmd','.bat','')
     }
 
-    foreach ($directory in @($PathValue -split ';')) {
+    foreach ($directory in @($PathValue -split [regex]::Escape([string]$pathSeparator))) {
         if (-not $directory) { continue }
         foreach ($extension in $extensions) {
             $candidate = Join-Path $directory ($Name + $extension)
@@ -142,6 +146,7 @@ function Resolve-ExecutableFromPath {
 $preflight = [ordered]@{
     generated_at = (Get-Date).ToString('o')
     sandbox = $Sandbox
+    platform = $platform
     codex = [string]$codex
     original_path_contains_windowsapps = ($removedWindowsApps.Count -gt 0)
     removed_windowsapps_entries = @($removedWindowsApps)
@@ -157,19 +162,19 @@ $preflight = [ordered]@{
     missing_companions = $distribution.missing_companions
     explicit_codex_cli_path = [bool]$env:CODEX_CLI_PATH
     sandbox_helper = $distribution.sandbox_setup_helper
-    sandbox_helper_expected = Join-Path $distribution.distribution_root 'codex-windows-sandbox-setup.exe'
+    sandbox_helper_expected = if ($platform -eq 'Windows') { Join-Path $distribution.distribution_root 'codex-windows-sandbox-setup.exe' } else { $null }
     sandbox_helper_exists = ($null -ne $distribution.sandbox_setup_helper)
     sandbox_helper_adjacent = ($null -ne $distribution.sandbox_setup_helper)
     sandbox_helper_candidates = @($distribution.sandbox_setup_helper)
     sandbox_helper_path_added = $false
-    workaround = 'child-path-windowsapps-filter'
+    workaround = if ($platform -eq 'Windows') { 'child-path-windowsapps-filter' } else { 'none' }
 }
 $preflight | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $preflightPath -Encoding UTF8
 
 if (-not $distribution.sandbox_ready) {
     $result = [pscustomobject]@{
         status = 'blocked'
-        summary = 'Codex executable found, but its distribution is incomplete for Windows sandbox workers.'
+        summary = "Codex executable failed $platform distribution checks."
         verification = @('Sandbox worker was refused before Codex model execution.')
         changed_files = @()
         unresolved = ('Missing companion binaries: ' + ($distribution.missing_companions -join ', '))
@@ -178,10 +183,29 @@ if (-not $distribution.sandbox_ready) {
         confidence = 1
         should_review = $false
         failure_signature = 'incomplete_codex_distribution'
-        next_action = 'Set CODEX_CLI_PATH to a complete Codex distribution containing the required adjacent companion binaries.'
+        next_action = 'Set CODEX_CLI_PATH to an executable Codex distribution with the components required by this platform.'
     }
     $wrapper = [pscustomobject]@{ tier=$TierId; model=[string]$tier.model; reasoning=[string]$tier.reasoning; codex_exit_code=0; result=$result; parse_error=$null; stderr_tail=''; step_dir=$StepDir; shell_preflight=$preflight }
     $wrapper | ConvertTo-Json -Depth 20 -Compress
+    return
+}
+
+# Validate exact model IDs and reasoning levels rather than silently using another model.
+$modelError = $null
+try {
+    $catalog = @(Get-CodexModelCatalog -CodexPath $codex)
+    if (-not (Test-GearboxModelSupport -Tier $tier -Catalog $catalog)) {
+        $modelError = "The Codex catalog does not advertise $($tier.model) with reasoning=$($tier.reasoning)."
+    }
+} catch { $modelError = $_.Exception.Message }
+if ($modelError) {
+    $result = [pscustomobject]@{
+        status='blocked'; summary=$modelError; verification=@('No model inference was started.')
+        changed_files=@(); unresolved=$modelError; recommended_next_tier=$null
+        risk='low'; confidence=1; should_review=$false; failure_signature='model_unavailable'
+        next_action='Check existing Codex account access and CLI model catalog, or configure supported tiers in config/gearbox.local.json.'
+    }
+    [pscustomobject]@{ tier=$TierId; model=[string]$tier.model; reasoning=[string]$tier.reasoning; codex_exit_code=0; result=$result; parse_error=$null; stderr_tail=''; step_dir=$StepDir; shell_preflight=$preflight } | ConvertTo-Json -Depth 20 -Compress
     return
 }
 
@@ -217,6 +241,17 @@ $stderrTail = ''
 if (Test-Path $stderrPath) {
     $lines = Get-Content -LiteralPath $stderrPath -ErrorAction SilentlyContinue
     if ($lines) { $stderrTail = (($lines | Select-Object -Last 20) -join "`n") }
+}
+
+if ($exitCode -ne 0 -and $stderrTail -match 'HTTP CONNECT failed with status 403|CONNECT tunnel failed, response 403') {
+    $result = [pscustomobject]@{
+        status='blocked'; summary='The HTTPS proxy refused the Codex connection (HTTP CONNECT 403).'
+        verification=@('The model call could not complete.'); changed_files=@()
+        unresolved='Codex requires HTTPS access to its configured model endpoint.'
+        recommended_next_tier=$null; risk='low'; confidence=1; should_review=$false
+        failure_signature='proxy_connection_denied'
+        next_action='Allow the configured Codex endpoint in environment network settings, then retry with existing authentication.'
+    }
 }
 
 $wrapper = [pscustomobject]@{

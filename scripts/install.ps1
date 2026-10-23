@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [string]$InstallRoot = (Join-Path $HOME '.codex-gearbox')
+    [string]$InstallRoot = (Join-Path $HOME '.codex-gearbox'),
+    [switch]$SkipPlugin,
+    [switch]$SkipSkillFallbacks
 )
 
 . (Join-Path $PSScriptRoot 'common.ps1')
@@ -37,34 +39,37 @@ $fallbacks = @(
     (Join-Path $HOME '.agents\skills\codex-gearbox'),
     (Join-Path $HOME '.codex\skills\codex-gearbox')
 )
+if ($SkipSkillFallbacks) { $fallbacks = @() }
 foreach ($target in $fallbacks) {
-    if (Test-Path $target) { Remove-Item -LiteralPath $target -Recurse -Force }
-    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-    Copy-Item -LiteralPath $skillSource -Destination $target -Recurse -Force
+    New-Item -ItemType Directory -Path $target -Force | Out-Null
+    Copy-Item -Path (Join-Path $skillSource '*') -Destination $target -Recurse -Force
     Write-Host "Installed skill fallback: $target"
 }
 
 $pluginState = 'unsupported-or-failed'
-try {
-    $pluginHelp = (& $codex plugin --help 2>&1 | Out-String)
-    if ($LASTEXITCODE -eq 0) {
-        $marketplaceName = [string](Get-Content -LiteralPath (Join-Path $root '.agents\plugins\marketplace.json') -Raw | ConvertFrom-Json).name
-        & $codex plugin marketplace add $root *> $null
+if (-not $SkipPlugin) {
+    try {
+        $pluginHelp = (& $codex plugin --help 2>&1 | Out-String)
         if ($LASTEXITCODE -eq 0) {
-            & $codex plugin remove ("codex-gearbox@" + $marketplaceName) *> $null
-            & $codex plugin add ("codex-gearbox@" + $marketplaceName) *> $null
-            if ($LASTEXITCODE -eq 0) { $pluginState = 'installed' } else { $pluginState = 'marketplace-added-plugin-add-failed' }
+            $marketplaceName = [string](Get-Content -LiteralPath (Join-Path $root '.agents\plugins\marketplace.json') -Raw | ConvertFrom-Json).name
+            & $codex plugin marketplace add $root *> $null
+            if ($LASTEXITCODE -eq 0) {
+                & $codex plugin remove ("codex-gearbox@" + $marketplaceName) *> $null
+                & $codex plugin add ("codex-gearbox@" + $marketplaceName) *> $null
+                if ($LASTEXITCODE -eq 0) { $pluginState = 'installed' } else { $pluginState = 'marketplace-added-plugin-add-failed' }
+            }
+            else { $pluginState = 'marketplace-add-failed' }
         }
-        else { $pluginState = 'marketplace-add-failed' }
     }
+    catch { $pluginState = 'plugin-command-error' }
 }
-catch {
-    $pluginState = 'plugin-command-error'
-}
+else { $pluginState = 'skipped' }
 
 Write-Host "Runtime: $InstallRoot" -ForegroundColor Green
 Write-Host "Plugin: $pluginState"
-Write-Host 'A new Codex thread/restart may be needed once for plugin/skill indexing.'
+if (-not $SkipPlugin -or -not $SkipSkillFallbacks) {
+    Write-Host 'A new Codex thread/restart may be needed once for plugin/skill indexing.'
+}
 
 [pscustomobject]@{
     runtime = $InstallRoot

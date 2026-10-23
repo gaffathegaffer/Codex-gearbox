@@ -36,11 +36,11 @@ try {
   New-DummyFile (Join-Path $external 'codex-windows-sandbox-setup.exe')
   New-DummyFile (Join-Path $windowsApps 'codex.exe')
 
-  $completeInfo=Test-CodexSandboxDistribution (Join-Path $complete 'codex.exe')
+  $completeInfo=Test-CodexSandboxDistribution (Join-Path $complete 'codex.exe') -Platform Windows
   if(-not $completeInfo.sandbox_ready){throw 'Complete synthetic distribution was not accepted.'}
   if($completeInfo.missing_companions.Count -ne 0){throw 'Complete synthetic distribution reported missing companions.'}
 
-  $incompleteInfo=Test-CodexSandboxDistribution (Join-Path $incomplete 'codex.exe')
+  $incompleteInfo=Test-CodexSandboxDistribution (Join-Path $incomplete 'codex.exe') -Platform Windows
   if($incompleteInfo.sandbox_ready){throw 'Versioned runner-only layout was accepted.'}
   foreach($name in @('codex-windows-sandbox-setup.exe','codex-command-runner.exe','codex-code-mode-host.exe')) {
     if($incompleteInfo.missing_companions -notcontains $name){throw "Missing companion was not reported: $name"}
@@ -50,30 +50,30 @@ try {
   $missingSetup=Join-Path $fixtureRoot 'missing-setup'
   New-CompleteFixture $missingSetup
   Remove-Item -LiteralPath (Join-Path $missingSetup 'codex-windows-sandbox-setup.exe') -Force
-  if((Test-CodexSandboxDistribution (Join-Path $missingSetup 'codex.exe')).missing_companions -notcontains 'codex-windows-sandbox-setup.exe'){throw 'Missing setup helper was not detected.'}
+  if((Test-CodexSandboxDistribution (Join-Path $missingSetup 'codex.exe') -Platform Windows).missing_companions -notcontains 'codex-windows-sandbox-setup.exe'){throw 'Missing setup helper was not detected.'}
 
   $missingRunner=Join-Path $fixtureRoot 'missing-runner'
   New-CompleteFixture $missingRunner
   Remove-Item -LiteralPath (Join-Path $missingRunner 'codex-command-runner.exe') -Force
   New-DummyFile (Join-Path $missingRunner 'codex-command-runner-0.146.0-alpha.9.2.exe')
-  if((Test-CodexSandboxDistribution (Join-Path $missingRunner 'codex.exe')).missing_companions -notcontains 'codex-command-runner.exe'){throw 'Missing unversioned command runner was not detected.'}
+  if((Test-CodexSandboxDistribution (Join-Path $missingRunner 'codex.exe') -Platform Windows).missing_companions -notcontains 'codex-command-runner.exe'){throw 'Missing unversioned command runner was not detected.'}
 
   $missingHost=Join-Path $fixtureRoot 'missing-host'
   New-CompleteFixture $missingHost
   Remove-Item -LiteralPath (Join-Path $missingHost 'codex-code-mode-host.exe') -Force
-  if((Test-CodexSandboxDistribution (Join-Path $missingHost 'codex.exe')).missing_companions -notcontains 'codex-code-mode-host.exe'){throw 'Missing code-mode-host was not detected.'}
+  if((Test-CodexSandboxDistribution (Join-Path $missingHost 'codex.exe') -Platform Windows).missing_companions -notcontains 'codex-code-mode-host.exe'){throw 'Missing code-mode-host was not detected.'}
 
   $env:LOCALAPPDATA=Join-Path $fixtureRoot 'AppData'
   $env:USERPROFILE=$userProfile
   $env:PATH=(Join-Path $windowsApps '')+';'+$oldPath
   Remove-Item Env:CODEX_CLI_PATH -ErrorAction SilentlyContinue
-  $implicit=Get-CodexCommand
+  $implicit=Get-CodexCommand -Platform Windows
   if($implicit -ne (Resolve-Path (Join-Path $complete 'codex.exe')).Path){throw 'Implicit discovery did not choose the complete user-owned candidate.'}
 
   $env:CODEX_CLI_PATH=(Join-Path $incomplete 'codex.exe')
   $explicit=[Environment]::ExpandEnvironmentVariables([string]$env:CODEX_CLI_PATH)
   if(-not (Test-Path -LiteralPath $explicit -PathType Leaf)){throw 'Synthetic explicit incomplete CLI fixture is missing.'}
-  $explicitInfo=Test-CodexSandboxDistribution $explicit
+  $explicitInfo=Test-CodexSandboxDistribution $explicit -Platform Windows
   if($explicitInfo.sandbox_ready){throw 'Explicit valid incomplete CLI was reported sandbox-ready.'}
   if($explicitInfo.missing_companions.Count -ne 3){throw 'Explicit incomplete CLI did not report all missing companions.'}
 

@@ -6,7 +6,7 @@ Codex Gearbox is intentionally a thin orchestrator around supported Codex CLI pr
 
 1. The user supplies a task, profile, workspace, and optional floor/ceiling.
 2. `scripts/gearbox.ps1` resolves the profile and clamps all tiers to the configured range.
-3. `scripts/worker.ps1` launches `codex exec` with an explicit GPT-5.6 model and `model_reasoning_effort`.
+3. `scripts/worker.ps1` launches `codex exec` with an explicit configured GPT-6 / GPT-6.1 model and `model_reasoning_effort`.
 4. The worker operates in the real workspace and returns a JSON-schema-constrained decision.
 5. `scripts/verify.ps1` captures objective repository state and can run an explicit user-provided verification command.
 6. The router decides to complete, continue, escalate, downshift, review, or stop.
@@ -43,6 +43,10 @@ Default child sandbox: `workspace-write`.
 Default approval mode: `never` for child workers, because a nested non-interactive worker cannot stop for a phone-side approval prompt. The sandbox and Codex execpolicy remain the boundary.
 
 `danger-full-access` is available only as an explicit configuration/user override. Gearbox never silently falls back to it when a sandboxed worker fails.
+
+## Platform support
+
+Linux uses PowerShell 7.4+ and native Codex sandboxing. Its child PATH remains unchanged. Windows PowerShell 5.1 remains supported with Windows companion-binary validation and child-only WindowsApps filtering. Model and reasoning support is checked against `codex debug models` before each worker call.
 
 ## Windows caveat
 

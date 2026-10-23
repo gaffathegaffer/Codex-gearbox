@@ -42,10 +42,28 @@ function Get-GearboxConfig {
     return $config
 }
 
+function Get-GearboxPlatform {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { return 'Windows' }
+    return 'Unix'
+}
+
 function Test-CodexSandboxDistribution {
-    param([Parameter(Mandatory=$true)][string]$CodexPath)
+    param(
+        [Parameter(Mandatory=$true)][string]$CodexPath,
+        [ValidateSet('Windows','Unix')][string]$Platform = (Get-GearboxPlatform)
+    )
     $cli = (Resolve-Path -LiteralPath $CodexPath -ErrorAction Stop).Path
     $root = Split-Path -Parent $cli
+    if ($Platform -eq 'Unix') {
+        # Unix Codex supplies its own sandbox; Windows companion binaries do not apply.
+        $executable = (Test-Path -LiteralPath $cli -PathType Leaf) -and
+            (([int][IO.File]::GetUnixFileMode($cli) -band 73) -ne 0)
+        return [pscustomobject]@{
+            codex=$cli; version=$null; platform=$Platform; distribution_root=$root
+            sandbox_ready=$executable; sandbox_setup_helper=$null; command_runner=$null
+            code_mode_host=$null; missing_companions=@(); required_companions=@()
+        }
+    }
     $required = @(
         'codex-windows-sandbox-setup.exe',
         'codex-command-runner.exe',
@@ -60,6 +78,7 @@ function Test-CodexSandboxDistribution {
     }
     [pscustomobject]@{
         codex = $cli
+        platform = $Platform
         version = $null
         distribution_root = $root
         sandbox_ready = ($missing.Count -eq 0)
@@ -72,6 +91,7 @@ function Test-CodexSandboxDistribution {
 }
 
 function Get-CodexCommand {
+    param([ValidateSet('Windows','Unix')][string]$Platform = (Get-GearboxPlatform))
     if ($env:CODEX_CLI_PATH) {
         $explicit = [Environment]::ExpandEnvironmentVariables([string]$env:CODEX_CLI_PATH)
         if (Test-Path -LiteralPath $explicit -PathType Leaf) {
@@ -81,7 +101,7 @@ function Get-CodexCommand {
     }
 
     $candidates = New-Object System.Collections.ArrayList
-    if ($env:LOCALAPPDATA) {
+    if ($Platform -eq 'Windows' -and $env:LOCALAPPDATA) {
         $root = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
         if (Test-Path -LiteralPath $root -PathType Container) {
             Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | ForEach-Object {
@@ -90,24 +110,40 @@ function Get-CodexCommand {
             }
         }
     }
-    if ($env:USERPROFILE) {
+    if ($Platform -eq 'Windows' -and $env:USERPROFILE) {
         $candidate = Join-Path $env:USERPROFILE '.codex\plugins\.plugin-appserver\codex.exe'
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { [void]$candidates.Add($candidate) }
     }
-    $command = Get-Command codex -ErrorAction SilentlyContinue
+    $command = Get-Command codex -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $command) {
         $path = if ($command.Source) { $command.Source } else { $command.Definition }
         if ($path -and $path -notmatch '(?i)(^|\\)WindowsApps(\\|$)') { [void]$candidates.Add($path) }
     }
     foreach ($candidate in @($candidates | Select-Object -Unique)) {
         try {
-            if ((Test-CodexSandboxDistribution $candidate).sandbox_ready) { return (Resolve-Path -LiteralPath $candidate).Path }
+            if ((Test-CodexSandboxDistribution $candidate -Platform $Platform).sandbox_ready) { return (Resolve-Path -LiteralPath $candidate).Path }
         } catch { }
     }
     if ($candidates.Count -gt 0) {
-        throw 'Codex CLI candidates were found, but no complete Windows sandbox distribution was found. Set CODEX_CLI_PATH to a complete Codex distribution.'
+        throw "Codex CLI candidates were found, but none passed $Platform distribution checks. Set CODEX_CLI_PATH to a valid Codex distribution."
     }
     throw 'Codex CLI was not found on PATH and CODEX_CLI_PATH did not resolve to a file.'
+}
+
+function Get-CodexModelCatalog {
+    param([Parameter(Mandatory=$true)][string]$CodexPath)
+    $text = (& $CodexPath debug models 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $text) { throw 'Could not read codex debug models; check CLI version and existing Codex authentication.' }
+    $catalog = $text | ConvertFrom-Json
+    if ($text.StartsWith('[')) { return $catalog }
+    return $catalog.models
+}
+
+function Test-GearboxModelSupport {
+    param([Parameter(Mandatory=$true)]$Tier, [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Catalog)
+    $model = $Catalog | Where-Object { $_.slug -eq [string]$Tier.model } | Select-Object -First 1
+    if ($null -eq $model) { return $false }
+    return [bool](@($model.supported_reasoning_levels | Where-Object { $_.effort -eq [string]$Tier.reasoning }).Count -gt 0)
 }
 
 function Get-Tier {

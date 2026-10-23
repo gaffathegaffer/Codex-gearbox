@@ -1,20 +1,20 @@
 {
   "version": 1,
   "default_profile": "balance",
-  "minimum_codex_version": "0.144.0",
+  "minimum_codex_version": "0.163.0",
   "sandbox": "workspace-write",
   "context_char_limit": 24000,
   "tiers": [
-    {"id":"luna-low","model":"gpt-5.6-luna","reasoning":"low"},
-    {"id":"luna-medium","model":"gpt-5.6-luna","reasoning":"medium"},
-    {"id":"luna-high","model":"gpt-5.6-luna","reasoning":"high"},
-    {"id":"terra-medium","model":"gpt-5.6-terra","reasoning":"medium"},
-    {"id":"terra-high","model":"gpt-5.6-terra","reasoning":"high"},
-    {"id":"sol-medium","model":"gpt-5.6-sol","reasoning":"medium"},
-    {"id":"sol-high","model":"gpt-5.6-sol","reasoning":"high"},
-    {"id":"sol-xhigh","model":"gpt-5.6-sol","reasoning":"xhigh"},
-    {"id":"sol-max","model":"gpt-5.6-sol","reasoning":"max"},
-    {"id":"sol-ultra","model":"gpt-5.6-sol","reasoning":"ultra"}
+    {"id":"luna-low","model":"gpt-6-luna","reasoning":"low"},
+    {"id":"luna-medium","model":"gpt-6-luna","reasoning":"medium"},
+    {"id":"luna-high","model":"gpt-6-luna","reasoning":"high"},
+    {"id":"terra-medium","model":"gpt-6-sol","reasoning":"medium"},
+    {"id":"terra-high","model":"gpt-6-sol","reasoning":"high"},
+    {"id":"sol-medium","model":"gpt-6.1-sol","reasoning":"medium"},
+    {"id":"sol-high","model":"gpt-6.1-sol","reasoning":"high"},
+    {"id":"sol-xhigh","model":"gpt-6.1-sol","reasoning":"xhigh"},
+    {"id":"sol-max","model":"gpt-6.1-sol","reasoning":"max"},
+    {"id":"sol-ultra","model":"gpt-6.1-sol","reasoning":"ultra"}
   ],
   "profiles": {
     "eco": {

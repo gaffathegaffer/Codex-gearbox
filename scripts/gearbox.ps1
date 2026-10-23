@@ -204,7 +204,7 @@ for ($step = ($(if($resumeState){[int]$resumeState.current_step + 1}else{1})); $
     Add-RecoveryEvent $runDir $workerEvent @{ step=$step; tier=$currentTier; status=$workerStatus }
     try { Test-RecoveryFailureInjection 'after_worker_result' } catch { $state.terminal_status='interrupted'; Save-RecoveryState $runDir $state; Add-RecoveryEvent $runDir 'run_interrupted' @{ checkpoint='after_worker_result' }; throw }
 
-    if ($null -eq $result -or $exitCode -ne 0) {
+    if (($null -eq $result -or $exitCode -ne 0) -and ($null -eq $result -or $result.status -ne 'blocked')) {
         $next = Get-NextHigherTier -Config $config -CurrentTier $currentTier -MaxTier $MaxTier
         if ($null -ne $next -and $escalations -lt $maxEscalations) {
             $escalations++

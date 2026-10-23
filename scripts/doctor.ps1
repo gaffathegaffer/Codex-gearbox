@@ -13,33 +13,9 @@ function Add-Check {
     [void]$checks.Add([pscustomobject]@{ name=$Name; ok=$Ok; level=$Level; detail=$Detail })
 }
 
-function Get-OptionalPropertyValue {
-    param(
-        [Parameter(Mandatory=$false)]$Object,
-        [Parameter(Mandatory=$true)][string[]]$Names
-    )
-    if ($null -eq $Object) { return $null }
-    foreach ($name in $Names) {
-        $property = $Object.PSObject.Properties[$name]
-        if ($null -ne $property) { return $property.Value }
-    }
-    return $null
-}
-
-function Test-ModelIdentity {
-    param(
-        [Parameter(Mandatory=$true)]$Model,
-        [Parameter(Mandatory=$true)][string]$Expected
-    )
-    foreach ($name in @('slug','model','id')) {
-        $property = $Model.PSObject.Properties[$name]
-        if ($null -ne $property -and [string]$property.Value -eq $Expected) { return $true }
-    }
-    return $false
-}
-
-Add-Check 'windows' ($env:OS -eq 'Windows_NT') ("OS=" + [string]$env:OS) 'recommended'
-Add-Check 'powershell' ($PSVersionTable.PSVersion.Major -ge 5) ("PowerShell=" + $PSVersionTable.PSVersion.ToString())
+Add-Check 'platform' $true (Get-GearboxPlatform)
+$minimumPowerShell = if ((Get-GearboxPlatform) -eq 'Windows') { [version]'5.1' } else { [version]'7.4' }
+Add-Check 'powershell' ($PSVersionTable.PSVersion -ge $minimumPowerShell) ("PowerShell=" + $PSVersionTable.PSVersion.ToString() + "; minimum=$minimumPowerShell")
 
 $gitCommand = Get-Command git -ErrorAction SilentlyContinue
 if ($null -ne $gitCommand) {
@@ -57,7 +33,7 @@ try {
     $distribution = Test-CodexSandboxDistribution $codexInfo.path
     Add-Check 'codex-sandbox-distribution' $distribution.sandbox_ready ($(if ($distribution.sandbox_ready) { 'complete: ' + $distribution.distribution_root } else { 'incomplete; missing: ' + ($distribution.missing_companions -join ', ') }))
     $minimum = [version][string](Get-GearboxConfig).minimum_codex_version
-    Add-Check 'codex-gpt56-minimum' ($null -ne $codexInfo.version -and $codexInfo.version -ge $minimum) ("minimum=$minimum; installed=$($codexInfo.version)")
+    Add-Check 'codex-version-minimum' ($null -ne $codexInfo.version -and $codexInfo.version -ge $minimum) ("minimum=$minimum; installed=$($codexInfo.version)")
 
     $help = (& $codexInfo.path exec --help 2>&1 | Out-String)
     foreach ($flag in @('--model','--output-schema','--output-last-message','--sandbox')) {
@@ -65,35 +41,14 @@ try {
     }
 
     try {
-        $catalogText = (& $codexInfo.path debug models 2>$null | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $catalogText) {
-            $catalog = $catalogText | ConvertFrom-Json
-            $models = @()
-            if ($catalog -is [System.Array]) {
-                $models = @($catalog)
-            }
-            else {
-                $modelsValue = Get-OptionalPropertyValue -Object $catalog -Names @('models')
-                if ($null -ne $modelsValue) { $models = @($modelsValue) }
-            }
-
-            foreach ($slug in @('gpt-5.6-luna','gpt-5.6-terra','gpt-5.6-sol')) {
-                $model = $models | Where-Object { Test-ModelIdentity -Model $_ -Expected $slug } | Select-Object -First 1
-                Add-Check ("model-catalog:$slug") ($null -ne $model) ($(if ($model) { 'available in local Codex model catalog' } else { 'not found in local Codex model catalog' })) 'recommended'
-            }
-
-            $sol = $models | Where-Object { Test-ModelIdentity -Model $_ -Expected 'gpt-5.6-sol' } | Select-Object -First 1
-            if ($sol) {
-                $solText = ($sol | ConvertTo-Json -Depth 20 -Compress)
-                Add-Check 'model-catalog:sol-ultra' ($solText -match 'ultra') ($(if ($solText -match 'ultra') { 'Sol Ultra advertised by local catalog.' } else { 'Sol Ultra not advertised by this local catalog; keep it opt-in and do not use until supported.' })) 'optional'
-            }
-        }
-        else {
-            Add-Check 'model-catalog' $false '`codex debug models` unavailable or returned no data.' 'optional'
+        $catalog = @(Get-CodexModelCatalog -CodexPath $codexInfo.path)
+        foreach ($tier in (Get-GearboxConfig).tiers) {
+            $level = if ($tier.reasoning -eq 'ultra') { 'optional' } else { 'required' }
+            Add-Check ("model-catalog:" + $tier.id) (Test-GearboxModelSupport -Tier $tier -Catalog $catalog) ("model=" + $tier.model + "; reasoning=" + $tier.reasoning) $level
         }
     }
     catch {
-        Add-Check 'model-catalog' $false ('Could not inspect local model catalog: ' + $_.Exception.Message) 'optional'
+        Add-Check 'model-catalog' $false ('Could not inspect Codex model catalog: ' + $_.Exception.Message)
     }
 }
 catch {
@@ -162,7 +117,7 @@ if ($SmokeTest -and $codexInfo) {
     $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('gearbox-smoke-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $temp -Force | Out-Null
     try {
-        $output = (& $codexInfo.path --ask-for-approval never exec --skip-git-repo-check --cd $temp --model gpt-5.6-luna -c 'model_reasoning_effort=low' --sandbox read-only --ephemeral 'Reply with exactly GEARBOX_OK' 2>&1 | Out-String)
+        $output = (& $codexInfo.path --ask-for-approval never exec --skip-git-repo-check --cd $temp --model ([string](Get-GearboxConfig).tiers[0].model) -c ('model_reasoning_effort=' + [string](Get-GearboxConfig).tiers[0].reasoning) --sandbox read-only --ephemeral 'Reply with exactly GEARBOX_OK' 2>&1 | Out-String)
         Add-Check 'live-luna-smoke' ($LASTEXITCODE -eq 0 -and $output -match 'GEARBOX_OK') 'Live inference completed. This consumed Codex usage.' 'optional'
     }
     catch { Add-Check 'live-luna-smoke' $false $_.Exception.Message 'optional' }

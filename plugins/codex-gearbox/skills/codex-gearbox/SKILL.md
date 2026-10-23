@@ -1,6 +1,6 @@
 ---
 name: codex-gearbox
-description: Route local Codex work adaptively across GPT-5.6 Luna, Terra and Sol using Eco, Balance or Sport profiles. Use when the user asks for Gearbox, autopilot, automatic model switching, quota-aware Codex execution, Eco/Balance/Sport mode, a model ceiling/floor, or wants a task delegated to the cheapest capable Codex tier with escalation when needed.
+description: Route local Codex work adaptively on Linux and Windows across GPT-6 Luna, GPT-6 Sol and GPT-6.1 Sol using Eco, Balance or Sport profiles. Use when the user asks for Gearbox, autopilot, automatic model switching, quota-aware Codex execution, Eco/Balance/Sport mode, a model ceiling/floor, or wants a task delegated to the cheapest capable Codex tier with escalation when needed.
 ---
 
 # Codex Gearbox
@@ -16,6 +16,12 @@ Use the installed Gearbox runtime instead of manually simulating adaptive routin
 - `workspace-write` is the default sandbox. Never silently switch to `danger-full-access` / `--yolo`.
 - Preserve local and uncommitted work. Never run destructive Git cleanup as part of routing.
 - `sol-ultra` is an explicit opt-in ceiling. Never select Ultra unless the user requested `-MaxTier sol-ultra` (or set an equivalent local override) and the installed Codex model catalog advertises Ultra support.
+
+## Platforms and models
+
+On Linux, use PowerShell 7.4+ (`pwsh -NoProfile -File scripts/gearbox.ps1 ...`); Windows PowerShell 5.1+ remains supported. Reuse the existing checkout in cloud tasks; do not create a worktree unless explicitly requested. Linux uses native Codex sandboxing, while Windows requires a complete Windows Codex distribution.
+
+Tier IDs are stable: `luna-*` uses `gpt-6-luna`, `terra-*` uses `gpt-6-sol`, and `sol-*` uses `gpt-6.1-sol`. Workers validate exact model and reasoning support against the CLI catalog. To use only GPT-6.1 Sol, set `-MinTier sol-medium -StartTier sol-medium -MaxTier sol-high`.
 
 ## Find the runtime
 

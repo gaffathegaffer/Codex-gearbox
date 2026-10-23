@@ -1,6 +1,6 @@
 # Codex Gearbox bootstrap procedure
 
-This document is meant to be executed by Codex on the user's Windows PC.
+This document is meant to be executed by Codex on the user's Linux cloud machine or Windows PC.
 
 ## Goal
 
@@ -13,12 +13,12 @@ Leave Codex Gearbox installed, indexed, diagnosed, and ready for later routed ta
 3. If the checkout is behind `origin/main`, update it non-destructively. If clean, normally use `git fetch origin` and `git pull --ff-only origin main`. If dirty, preserve the changes and integrate safely rather than discarding them.
 4. Read `AGENTS.md`, `README.md`, and `plugins/codex-gearbox/skills/codex-gearbox/SKILL.md`.
 5. Inspect the locally installed Codex before assuming flags or paths:
-   - `where.exe codex`
+   - `Get-Command codex`
    - `codex --version`
    - `codex exec --help`
    - `codex doctor --summary --ascii`
-6. GPT-5.6 in Codex requires Codex CLI 0.144.0 or newer. If the installed CLI is older, identify how this PC installed Codex and update it using the matching official/safe channel. Preserve authentication and user config. Do not guess package-manager commands if installation provenance is unclear.
-7. Run `scripts/install.ps1`. It should:
+6. This configuration is validated with Codex CLI 0.163.0 or newer and the `gpt-6-luna`, `gpt-6-sol`, and `gpt-6.1-sol` catalog entries. Check `codex debug models` for exact model and reasoning availability. If the installed CLI is older, identify how this machine installed Codex and update it using the matching official/safe channel. Preserve authentication and user config. Do not guess package-manager commands if installation provenance is unclear.
+7. On Linux use PowerShell 7.4+ (`pwsh -NoProfile -File scripts/install.ps1`); on Windows use PowerShell 5.1+. Managed cloud tasks should reuse the existing checkout and not create a worktree unless requested. For a read-only home use writable XDG directories and `-InstallRoot /workspace/shared/codex-gearbox -SkipPlugin -SkipSkillFallbacks`. Run `scripts/install.ps1`. It should:
    - copy the Gearbox runtime to `$HOME\.codex-gearbox`;
    - install/update the local Codex plugin if the installed CLI exposes plugin commands;
    - install personal skill fallbacks under `$HOME\.agents\skills\codex-gearbox` and `$HOME\.codex\skills\codex-gearbox`.
